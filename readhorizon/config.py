@@ -60,6 +60,11 @@ class Settings:
     ocr_max_images: int = 10
     ocr_max_pages: int = 20
     ocr_effort: str = "medium"
+    # 번역·풀이 한 번에 옮길 원문 분량(글자). 응답 한도 안에서 빠짐없이 옮기도록 긴 글은 부분으로 나눈다
+    translate_part_chars: int = 6000
+    # 품질 평가(eval-quality) 채점 모델·effort. 모델을 비우면 분석 모델과 같은 모델을 쓴다
+    judge_model: str | None = None
+    judge_effort: str = "high"
 
     @property
     def bib_enabled(self) -> bool:
@@ -81,6 +86,9 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
     ocr_effort = os.getenv("RH_OCR_EFFORT", "medium").strip().lower()
     if ocr_effort not in VALID_EFFORTS:
         ocr_effort = "medium"
+    judge_effort = os.getenv("RH_JUDGE_EFFORT", "high").strip().lower()
+    if judge_effort not in VALID_EFFORTS:
+        judge_effort = "high"
 
     return Settings(
         db_path=Path(os.getenv("RH_DB_PATH", "data/readhorizon.db")),
@@ -98,4 +106,7 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
         ocr_max_images=min(20, max(1, _int_env("RH_OCR_MAX_IMAGES", 10))),
         ocr_max_pages=min(100, max(1, _int_env("RH_OCR_MAX_PAGES", 20))),
         ocr_effort=ocr_effort,
+        translate_part_chars=min(20_000, max(1000, _int_env("RH_TRANSLATE_PART_CHARS", 6000))),
+        judge_model=os.getenv("RH_JUDGE_MODEL", "").strip() or None,
+        judge_effort=judge_effort,
     )

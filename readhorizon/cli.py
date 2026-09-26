@@ -5,6 +5,7 @@
   python -m readhorizon purge
   python -m readhorizon eval samples/eval_items.sample.json
   python -m readhorizon eval-ocr samples/ocr/manifest.sample.json
+  python -m readhorizon eval-quality samples/quality_items.sample.json [--out 결과.json] [--baseline 이전결과.json]
 """
 
 from __future__ import annotations
@@ -35,6 +36,12 @@ def main(argv: list[str] | None = None) -> int:
 
     ev_ocr = sub.add_parser("eval-ocr", help="이미지 글자 추출(OCR) 정확도(CER) 평가")
     ev_ocr.add_argument("path", type=Path)
+
+    ev_quality = sub.add_parser("eval-quality", help="번역·해설 품질 평가(핵심 포인트·오류 분류, AI 채점)")
+    ev_quality.add_argument("path", type=Path)
+    ev_quality.add_argument("--out", type=Path, help="결과 JSON을 저장할 파일")
+    ev_quality.add_argument("--baseline", type=Path, help="비교할 이전 결과 JSON(--out으로 저장한 파일)")
+    ev_quality.add_argument("--no-judge", action="store_true", help="AI 채점 없이 자동 지표만 계산")
 
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -84,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         llm = ClaudeClient(settings.model, settings.effort) if settings.llm_mode == "live" else DemoClient()
         if llm.mode == "demo":
             print("주의: 데모 모드입니다. 실제 정답률을 재려면 ANTHROPIC_API_KEY를 설정하세요.", file=sys.stderr)
-        engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit)
+        engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit, settings.translate_part_chars)
         try:
             report = run_benchmark(engine, load_items(args.path))
         except BenchmarkError as exc:
@@ -92,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
+
+    if args.command == "eval-quality":
+        return _eval_quality(args, settings, store)
 
     if args.command == "eval-ocr":
         from .analysis.llm import ClaudeClient, DemoClient
@@ -115,6 +125,47 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return 1
+
+
+def _eval_quality(args, settings, store) -> int:
+    from .analysis.engine import AnalysisEngine
+    from .analysis.llm import ClaudeClient, DemoClient, LLMError
+    from .quality_eval import QualityEvalError, compare, load_items, run_quality_eval
+    from .references.store import ReferenceIndex
+
+    live = settings.llm_mode == "live"
+    llm = ClaudeClient(settings.model, settings.effort) if live else DemoClient()
+    judge = None
+    if live and not args.no_judge:
+        judge = ClaudeClient(settings.judge_model or settings.model, settings.judge_effort)
+    elif not live:
+        print("주의: 데모 모드입니다. AI 채점은 건너뛰고 자동 지표만 계산합니다(ANTHROPIC_API_KEY 필요).", file=sys.stderr)
+    engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit, settings.translate_part_chars)
+
+    baseline = None
+    if args.baseline:
+        try:
+            baseline = json.loads(args.baseline.read_text(encoding="utf-8"))["summary"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"오류: 비교할 이전 결과를 읽을 수 없습니다: {exc}", file=sys.stderr)
+            return 1
+    try:
+        items = load_items(args.path)
+        if live:
+            calls = len(items) * (2 if judge else 1)
+            print(f"문항 {len(items)}개 평가: Claude API를 {calls}회 호출합니다(비용 발생).", file=sys.stderr)
+        report = run_quality_eval(engine, judge, items)
+    except (QualityEvalError, LLMError) as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return 1
+    if baseline is not None:
+        report["baseline_delta"] = compare(report["summary"], baseline)
+    text = json.dumps(report, ensure_ascii=False, indent=2)
+    if args.out:
+        args.out.write_text(text + "\n", encoding="utf-8")
+        print(f"결과를 {args.out}에 저장했습니다.", file=sys.stderr)
+    print(text)
+    return 0
 
 
 if __name__ == "__main__":

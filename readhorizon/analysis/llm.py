@@ -2,7 +2,7 @@
 
 - ClaudeClient: Claude API(Messages, Citations). 작품 원문은 '문단 = 블록'인 custom content 문서로 보내
   인용 위치를 문단 번호로 돌려받는다. 원문 문서에는 prompt caching을 걸어 같은 작품의 반복 질문 비용을 줄인다.
-- 이미지·스캔 PDF 전사(OCR)는 구조화 출력(JSON 스키마)으로 받는다. 인용 기능과는 함께 쓰지 않는다.
+- 이미지·스캔 PDF 전사(OCR)와 품질 평가 채점은 구조화 출력(JSON 스키마)으로 받는다. 인용 기능과는 함께 쓰지 않는다.
 - DemoClient: API 키가 없을 때 화면 흐름을 확인하기 위한 결정적 응답. 실제 분석이 아니며 결과에 그렇게 표시한다.
 """
 
@@ -31,6 +31,7 @@ ADAPTIVE_PREFIXES = (
 )
 MAX_TOKENS = 32000
 OCR_MAX_TOKENS = 64000
+JSON_MAX_TOKENS = 32000
 
 # 전사 결과 형식(구조화 출력). text의 [?]·[?글자] 표시는 판독이 불확실한 글자다.
 OCR_SCHEMA = {
@@ -89,6 +90,14 @@ class OCRResult:
     text: str
     layout: str
     notes: list[str]
+    model: str
+    fallback_used: bool = False
+    usage: dict = field(default_factory=dict)
+
+
+@dataclass
+class JSONResult:
+    data: dict
     model: str
     fallback_used: bool = False
     usage: dict = field(default_factory=dict)
@@ -180,8 +189,22 @@ class ClaudeClient:
         }
         return self._model_options(request, self.ocr_effort)
 
+    def build_json_request(self, system: str, prompt: str, schema: dict) -> dict:
+        request: dict = {
+            "model": self.model,
+            "max_tokens": JSON_MAX_TOKENS,
+            "system": [{"type": "text", "text": system}],
+            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
+        }
+        return self._model_options(request, self.effort)
+
     def generate(self, system: str, docs: list[DocSpec], task: str, meta: dict) -> LLMResult:
         return parse_message(self._stream(self.build_request(system, docs, task)))
+
+    def complete_json(self, system: str, prompt: str, schema: dict) -> JSONResult:
+        """구조화 출력으로 JSON 객체를 받는다(품질 평가 채점 등)."""
+        return parse_json_message(self._stream(self.build_json_request(system, prompt, schema)))
 
     def transcribe(self, images: list[bytes], pdf: bytes | None, system: str, task: str) -> OCRResult:
         return parse_ocr_message(self._stream(self.build_ocr_request(images, pdf, system, task)))
@@ -242,6 +265,23 @@ def parse_ocr_message(message) -> OCRResult:
         fallback_used=fallback_used,
         usage=usage,
     )
+
+
+def parse_json_message(message) -> JSONResult:
+    stop = getattr(message, "stop_reason", None)
+    if stop == "refusal":
+        raise LLMRefusal("안전 정책에 따라 이 요청은 처리할 수 없습니다.")
+    if stop == "max_tokens":
+        raise LLMError("응답이 길어 끝까지 받지 못했습니다.")
+    raw = "".join(b.text or "" for b in getattr(message, "content", None) or [] if getattr(b, "type", None) == "text")
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise LLMError("구조화 응답을 해석하지 못했습니다.") from exc
+    if not isinstance(data, dict):
+        raise LLMError("구조화 응답 형식이 올바르지 않습니다.")
+    usage, fallback_used = _usage(message)
+    return JSONResult(data, getattr(message, "model", ""), fallback_used, usage)
 
 
 def parse_message(message) -> LLMResult:
@@ -333,11 +373,13 @@ class DemoClient:
                 blocks.append(RawBlock("\n정답: 판단 불가(데모)\n"))
         elif kind in ("flow", "translate"):
             heading = "## 문단 흐름" if kind == "flow" else "## 번역·풀이"
+            note = "요지가" if kind == "flow" else "번역문이"
             blocks.append(RawBlock(heading + "\n"))
-            for pos in range(min(count, 12)):
+            # 번역은 받은 부분을 모두 옮기는 흐름(누락 검사 포함)을 보여 주기 위해 모든 블록을 인용한다
+            for pos in range(count if kind == "translate" else min(count, 12)):
                 blocks.append(RawBlock("- "))
                 blocks.append(cite_work(pos, short(doc.blocks[pos])))
-                blocks.append(RawBlock(" — (데모) 이 부분의 요지가 여기에 표시됩니다.\n"))
+                blocks.append(RawBlock(f" — (데모) 이 부분의 {note} 여기에 표시됩니다.\n"))
         else:
             for i, title in enumerate(meta.get("sections") or ["요지"]):
                 pos = i % count

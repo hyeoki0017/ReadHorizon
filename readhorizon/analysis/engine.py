@@ -2,6 +2,9 @@
 
 문서 순서(인용 번호 = 이 순서): [작품 원문] + [참고자료...] + [사용자 제공 소개]
 작품 원문 문서에만 cache_control을 걸어 시스템 프롬프트 + 원문까지를 캐시한다.
+
+번역·풀이는 발췌하지 않는다. 결과가 원문 분량만큼 길어 한 번의 응답 한도를 넘기 쉬우므로, 원문을 앞에서부터
+연속된 부분(기본 6,000자)으로 나누고 요청마다 한 부분을 빠짐없이 옮긴다. 결과에는 누락·숫자 검사를 붙인다.
 """
 
 from __future__ import annotations
@@ -14,9 +17,12 @@ from ..references.search import BM25
 from ..references.store import ReferenceIndex
 from ..trust import INTRO_LABEL, INTRO_TIER, analysis_badge, tier_label
 from . import prompts
+from .checks import translation_checks
 from .grounding import is_supported, strip_label, summarize
 from .llm import DocSpec, LLMClient, LLMResult
-from .presets import KINDS, TRANSLATE_TARGETS, Category, Genre
+from .presets import KINDS, TRANSLATE_TARGETS, Category, Genre, parse_translate_option, translate_option
+
+DEFAULT_TRANSLATE_PART_CHARS = 6000
 
 
 class AnalysisRequestError(ValueError):
@@ -75,22 +81,64 @@ def select_paragraphs(paragraphs: list[Paragraph], limit: int, query: str | None
     return [paragraphs[i] for i in sorted(chosen)], True
 
 
+def split_parts(paragraphs: list[Paragraph], part_chars: int) -> list[list[Paragraph]]:
+    """문단 순서를 유지하며 part_chars 안쪽의 연속된 부분으로 나눈다. 문단은 쪼개지 않는다."""
+    parts: list[list[Paragraph]] = []
+    current: list[Paragraph] = []
+    size = 0
+    for p in paragraphs:
+        if current and size + len(p.text) > part_chars:
+            parts.append(current)
+            current, size = [], 0
+        current.append(p)
+        size += len(p.text)
+    if current:
+        parts.append(current)
+    return parts
+
+
 class AnalysisEngine:
-    def __init__(self, llm: LLMClient, references: ReferenceIndex | None, fulltext_char_limit: int) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        references: ReferenceIndex | None,
+        fulltext_char_limit: int,
+        translate_part_chars: int = DEFAULT_TRANSLATE_PART_CHARS,
+    ) -> None:
         self.llm = llm
         self.references = references
         self.limit = fulltext_char_limit
+        self.part_chars = translate_part_chars
+
+    def translate_parts(self, paragraphs: list[Paragraph]) -> list[dict]:
+        """화면에서 번역 범위를 고를 수 있도록 부분 목록을 돌려준다."""
+        return [
+            {"part": n, "from": part[0].label, "to": part[-1].label, "chars": sum(len(p.text) for p in part)}
+            for n, part in enumerate(split_parts(paragraphs, self.part_chars), start=1)
+        ]
 
     # ── 문서 구성 ─────────────────────────────────────────
-    def _documents(self, ctx: WorkContext, query: str | None, ref_query: str) -> tuple[list[DocSpec], bool]:
+    def _documents(
+        self,
+        ctx: WorkContext,
+        query: str | None,
+        ref_query: str,
+        part: tuple[list[Paragraph], int, int] | None = None,
+    ) -> tuple[list[DocSpec], bool]:
+        """part = (부분 문단, 부분 번호, 전체 부분 수). 주어지면 발췌하지 않고 그 부분을 그대로 보낸다."""
         docs: list[DocSpec] = []
         excerpted = False
         if ctx.paragraphs:
-            selected, excerpted = select_paragraphs(ctx.paragraphs, self.limit, query)
+            if part is not None:
+                selected, number, count = part
+                suffix = f" ({number}/{count}부분)" if count > 1 else ""
+            else:
+                selected, excerpted = select_paragraphs(ctx.paragraphs, self.limit, query)
+                suffix = " (발췌)" if excerpted else ""
             docs.append(
                 DocSpec(
                     role="work",
-                    title=f"작품 원문: {ctx.title}" + (" (발췌)" if excerpted else ""),
+                    title=f"작품 원문: {ctx.title}{suffix}",
                     blocks=[block_text(p) for p in selected],
                     index_map=[p.index for p in selected],
                     display_title=ctx.title,
@@ -191,16 +239,14 @@ class AnalysisEngine:
                 "원문이 없어 이 분석은 할 수 없습니다. 소개글만으로는 '읽기 가이드'만 제공합니다. "
                 "작품 해석이 필요하면 원문을 올려 주세요."
             )
-        if kind == "translate" and option not in TRANSLATE_TARGETS:
-            option = "easy"
+        if kind == "translate":
+            return self._translate(ctx, option)
 
         info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre)
         if kind == "overview":
             task, sections = prompts.overview_task(info, ctx.genre), list(ctx.genre.sections)
         elif kind == "flow":
             task, sections = prompts.flow_task(info), ["부분별 흐름", "전체 흐름"]
-        elif kind == "translate":
-            task, sections = prompts.translate_task(info, option), [TRANSLATE_TARGETS[option], "어휘 풀이"]
         else:
             task, sections = prompts.guide_task(info, ctx.intro_only), list(prompts.GUIDE_SECTIONS)
 
@@ -209,7 +255,37 @@ class AnalysisEngine:
         if not docs:
             raise AnalysisRequestError("분석할 원문이나 소개글이 없습니다.")
         result = self.llm.generate(prompts.SYSTEM_PROMPT, docs, task, {"kind": kind, "sections": sections})
-        return self._finish(ctx, result, docs, excerpted, {"kind": kind, "option": option})
+        return self._finish(ctx, result, docs, excerpted, {"kind": kind, "option": ""})
+
+    def _translate(self, ctx: WorkContext, option: str) -> dict:
+        target, number = parse_translate_option(option)
+        parts = split_parts(ctx.paragraphs, self.part_chars)
+        if number > len(parts):
+            raise AnalysisRequestError(f"{number}부분은 없습니다. 이 작품의 번역 범위는 {len(parts)}부분입니다.")
+        selected = parts[number - 1]
+        span = f"{selected[0].label}~{selected[-1].label}" if len(selected) > 1 else selected[0].label
+        scope = (
+            f"[범위] 전체 {len(parts)}부분 중 {number}부분({span})입니다. 제공된 범위만 옮깁니다."
+            if len(parts) > 1
+            else ""
+        )
+        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre)
+        task = prompts.translate_task(info, target, scope)
+        sections = [TRANSLATE_TARGETS[target], "어휘 풀이"]
+        ref_query = f"{ctx.title} {ctx.author or ''} {ctx.genre.label} {' '.join(sections)}"
+        docs, _ = self._documents(ctx, None, ref_query, part=(selected, number, len(parts)))
+        result = self.llm.generate(prompts.SYSTEM_PROMPT, docs, task, {"kind": "translate", "sections": sections})
+        extra = {
+            "kind": "translate",
+            "option": translate_option(target, number),
+            "target": target,
+            "part": number,
+            "parts": len(parts),
+            "part_range": {"from": selected[0].label, "to": selected[-1].label},
+        }
+        finished = self._finish(ctx, result, docs, False, extra)
+        finished["checks"] = translation_checks(finished["segments"], selected, target)
+        return finished
 
     def ask(self, ctx: WorkContext, question: str, multiple_choice: bool = False) -> dict:
         question = question.strip()

@@ -257,6 +257,14 @@ select, input, textarea {
 .badge-medium { color: var(--warn); }
 .badge-low { color: var(--low); }
 .badge-intro { color: var(--intro); }
+.checks { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.checks-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.checks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.check-item strong { margin-right: 4px; }
+.check-ok strong { color: var(--ok); }
+.check-warn strong { color: var(--warn); }
+.check-jump { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+.check-para { font: inherit; font-size: 12px; border: 1px solid var(--warn); color: var(--warn); background: transparent; border-radius: 999px; padding: 1px 8px; cursor: pointer; }
 .result-meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 10px; }
 progress.meter {
   appearance: none;

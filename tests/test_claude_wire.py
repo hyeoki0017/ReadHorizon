@@ -65,6 +65,25 @@ def _ocr_events() -> list[dict]:
     ]
 
 
+def _judge_events() -> list[dict]:
+    payload = json.dumps(
+        {"key_points": [{"index": 1, "verdict": "yes", "evidence": "부끄럼 없는 삶"}], "errors": [], "summary": "정확함"},
+        ensure_ascii=False,
+    )
+    message = {
+        "id": "msg_judge", "type": "message", "role": "assistant", "model": "claude-opus-5", "content": [],
+        "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 500, "output_tokens": 1},
+    }
+    return [
+        {"type": "message_start", "message": message},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": payload}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 30}},
+        {"type": "message_stop"},
+    ]
+
+
 class FakeAnthropic(BaseHTTPRequestHandler):
     requests: list[dict] = []
     mode = "ok"
@@ -85,6 +104,8 @@ class FakeAnthropic(BaseHTTPRequestHandler):
             return
         if FakeAnthropic.mode == "ocr":
             data = _sse(_ocr_events())
+        elif FakeAnthropic.mode == "judge":
+            data = _sse(_judge_events())
         else:
             data = _sse(_stream_events("refusal" if FakeAnthropic.mode == "refusal" else "end_turn"))
         self.send_response(200)
@@ -162,3 +183,19 @@ def test_sdk_ocr_round_trip_with_structured_output(fake_server):
     assert image["type"] == "image" and image["source"]["media_type"] == "image/jpeg"
     assert result["text"] == "죽는 날까지 하늘을 우러[?]" and result["uncertain_count"] == 1
     assert result["layout"] == "가로쓰기 1단" and result["mode"] == "live"
+
+
+def test_sdk_judge_round_trip_with_structured_output(fake_server):
+    from readhorizon.quality_eval import JUDGE_SCHEMA, JUDGE_SYSTEM
+
+    FakeAnthropic.mode = "judge"
+    sdk = anthropic.Anthropic(api_key="test-key", base_url=fake_server, max_retries=0)
+    judge = ClaudeClient("claude-opus-5", "high", client=sdk)
+    result = judge.complete_json(JUDGE_SYSTEM, "채점해 주세요", JUDGE_SCHEMA)
+
+    body = FakeAnthropic.requests[0]["body"]
+    assert body["output_config"] == {"format": {"type": "json_schema", "schema": JUDGE_SCHEMA}, "effort": "high"}
+    assert body["thinking"] == {"type": "adaptive"} and body["stream"] is True
+    assert "citations" not in json.dumps(body["messages"])  # 구조화 출력과 인용은 함께 쓰지 않는다
+    assert result.data["key_points"][0]["verdict"] == "yes" and result.data["summary"] == "정확함"
+    assert result.usage["output_tokens"] == 30 and result.model == "claude-opus-5"

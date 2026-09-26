@@ -150,6 +150,22 @@ TRANSLATE_TARGETS: dict[str, str] = {
 }
 
 
+def parse_translate_option(option: str | None) -> tuple[str, int]:
+    """'en', 'en:2'(대상:부분 번호) → (대상, 부분). 모르는 대상은 쉬운 말 풀이, 잘못된 번호는 1부분."""
+    target, _, part = (option or "").partition(":")
+    if target not in TRANSLATE_TARGETS:
+        target = "easy"
+    try:
+        number = int(part) if part else 1
+    except ValueError:
+        number = 1
+    return target, max(1, number)
+
+
+def translate_option(target: str, part: int) -> str:
+    return f"{target}:{part}"
+
+
 def find_genre(category_id: str, genre_id: str) -> tuple[Category, Genre] | None:
     for category in CATEGORIES:
         if category.id != category_id:

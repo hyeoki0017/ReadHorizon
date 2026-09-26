@@ -63,10 +63,39 @@ def test_create_work_from_paste_and_analyze(client, workspace, seosi_text):
     assert refreshed["cached"] is False
 
     translate = client.post(f"/api/works/{work_id}/analyze", json={"kind": "translate", "option": "en"}, headers=workspace).json()
-    assert translate["option"] == "en"
+    assert translate["option"] == "en:1" and translate["part"] == 1 and translate["parts"] == 1
+    assert translate["checks"]["items"][0] == {
+        "id": "coverage", "status": "ok", "label": "문단 누락", "detail": "모든 부분(9개)에 원문 인용이 붙었습니다",
+    }
 
     detail = client.get(f"/api/works/{work_id}", headers=workspace).json()
-    assert {(a["kind"], a["option"]) for a in detail["analyses"]} == {("overview", ""), ("translate", "en")}
+    assert {(a["kind"], a["option"]) for a in detail["analyses"]} == {("overview", ""), ("translate", "en:1")}
+    assert detail["translate_parts"] == [{"part": 1, "from": "1연 1행", "to": "2연 1행", "chars": sum(len(p["text"]) for p in detail["paragraphs"])}]
+
+
+def test_long_translation_is_split_into_parts(settings, store, workspace):
+    from dataclasses import replace
+
+    app = create_app(replace(settings, translate_part_chars=1000), llm=DemoClient(), store=store)
+    client = TestClient(app)
+    text = "\n\n".join(f"{n}번째 문단입니다. 1990년에서 20{n:02d}년까지의 일을 적습니다. " * 6 for n in range(1, 13))
+    work_id = client.post(
+        "/api/works", files=_multipart({"category": "custom", "genre": "general", "title": "긴 글", "text": text}), headers=workspace
+    ).json()["work"]["id"]
+
+    parts = client.get(f"/api/works/{work_id}", headers=workspace).json()["translate_parts"]
+    assert len(parts) > 1 and parts[0]["from"] == "1문단" and all(p["chars"] <= 1000 for p in parts)
+
+    second = client.post(f"/api/works/{work_id}/analyze", json={"kind": "translate", "option": "modern:2"}, headers=workspace).json()
+    assert second["option"] == "modern:2" and second["part"] == 2 and second["parts"] == len(parts)
+    cited = {i for s in second["segments"] for c in s["citations"] if c["source"] == "work" for i in c["paragraphs"]}
+    assert cited and min(cited) > 0  # 1부분 문단은 보내지 않는다
+    assert second["part_range"]["from"] == parts[1]["from"]
+
+    missing = client.post(f"/api/works/{work_id}/analyze", json={"kind": "translate", "option": "modern:99"}, headers=workspace)
+    assert missing.status_code == 422 and "부분" in missing.json()["detail"]
+    detail = client.get(f"/api/works/{work_id}", headers=workspace).json()
+    assert [a["option"] for a in detail["analyses"]] == ["modern:2"]
 
 
 def test_ask_saves_question_and_masks_it(client, workspace, seosi_text):

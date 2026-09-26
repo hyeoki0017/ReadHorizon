@@ -49,13 +49,15 @@ def flow_task(info: str) -> str:
 - 글 전체의 전개 방식을 2~3문장으로 요약합니다."""
 
 
-def translate_task(info: str, target: str) -> str:
+def translate_task(info: str, target: str, scope: str = "") -> str:
     target_label = TRANSLATE_TARGETS.get(target, TRANSLATE_TARGETS["easy"])
+    scope_line = f"\n{scope}" if scope else ""
     return f"""{info}
 
-[요청] {target_label}
+[요청] {target_label}{scope_line}
 ## {target_label}
-- 원문을 순서대로 '- [위치] 결과문' 형식으로 옮기고, 각 항목에 해당 원문을 인용합니다.
+- 제공된 원문의 모든 문단(운문은 행)을 순서대로 빠짐없이 '- [위치] 결과문' 형식으로 옮기고, 각 항목에 해당 원문을 인용합니다.
+- 숫자·연도·단위·고유명사는 원문 그대로 유지합니다.
 - 뜻이 확실하지 않은 고어·한자어·전문용어는 '(뜻 불확실)'로 표시하고 추측으로 채우지 않습니다.
 ## 어휘 풀이
 - 어려운 낱말과 뜻을 목록으로 정리합니다."""

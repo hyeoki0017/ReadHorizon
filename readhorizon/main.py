@@ -18,7 +18,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .analysis.engine import AnalysisEngine, AnalysisRequestError, WorkContext
 from .analysis.llm import ClaudeClient, DemoClient, LLMClient, LLMError, LLMRefusal
-from .analysis.presets import KINDS, TRANSLATE_TARGETS, categories_payload, find_genre
+from .analysis.presets import (
+    KINDS,
+    TRANSLATE_TARGETS,
+    categories_payload,
+    find_genre,
+    parse_translate_option,
+    translate_option,
+)
 from .catalog.bibliographic import BibliographicError, NationalLibraryClient
 from .config import Settings, load_settings
 from .db import Store
@@ -136,7 +143,7 @@ def create_app(
         )
     if bib_client is None and settings.nl_cert_key:
         bib_client = NationalLibraryClient(settings.nl_cert_key)
-    engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit)
+    engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit, settings.translate_part_chars)
     llm_limiter = RateLimiter(settings.llm_per_minute, settings.llm_daily)
     create_limiter = RateLimiter(settings.create_per_minute)
     upload_limit = settings.max_upload_mb * 1024 * 1024
@@ -329,9 +336,11 @@ def create_app(
         work = store.get_work(ws, work_id)
         if work is None:
             raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다.")
+        paragraphs = store.get_paragraphs(work_id)
         return {
             "work": work,
-            "paragraphs": _paragraph_dicts(store.get_paragraphs(work_id)),
+            "paragraphs": _paragraph_dicts(paragraphs),
+            "translate_parts": engine.translate_parts(paragraphs),
             "analyses": store.list_analyses(work_id),
             "questions": store.list_questions(work_id),
         }
@@ -349,7 +358,7 @@ def create_app(
             raise HTTPException(status_code=422, detail="알 수 없는 분석 종류입니다.")
         option = ""
         if body.kind == "translate":
-            option = body.option if body.option in TRANSLATE_TARGETS else "easy"
+            option = translate_option(*parse_translate_option(body.option))
         if not body.refresh:
             cached = store.get_analysis(work_id, body.kind, option)
             if cached is not None:

@@ -181,17 +181,35 @@ function resultHtml(result, { showBadge = true } = {}) {
   else if (result.model) meta.push(`모델 ${escapeHtml(result.model)}${result.fallback_used ? " (대체 모델)" : ""}`);
   if (result.cached) meta.push("저장된 결과");
   if (result.truncated) meta.push("응답이 길어 중간에 끊겼습니다");
+  if (result.parts > 1 && result.part_range) {
+    meta.push(`${Number(result.part)}/${Number(result.parts)}부분 (${escapeHtml(result.part_range.from)}~${escapeHtml(result.part_range.to)})`);
+  }
   const badge = result.badge || {};
   return `
     ${showBadge ? `<div class="badge badge-${escapeHtml(badge.level)}"><strong>${escapeHtml(badge.label)}</strong><span>${escapeHtml(badge.description)}</span></div>` : ""}
     ${badge.level !== "intro" ? `<progress class="meter" max="100" value="${pct}" title="근거율 ${pct}%"></progress>` : ""}
     <div class="result-meta"><span>근거율 ${pct}%</span>${meta.map((m) => `<span>${m}</span>`).join("")}</div>
+    ${checksHtml(result.checks)}
     ${renderSegments(result.segments || [])}
     <div class="cite-detail" hidden></div>`;
 }
 
+// 번역 자동 검사(누락 문단·숫자·분량). 오류 판정이 아니라 원문과 대조해 볼 곳을 알려 준다
+function checksHtml(checks) {
+  if (!checks || !checks.items) return "";
+  const items = checks.items.map((item) => {
+    const mark = item.status === "ok" ? "✓" : "⚠";
+    return `<li class="check-item check-${escapeHtml(item.status)}"><strong>${mark} ${escapeHtml(item.label)}</strong> ${escapeHtml(item.detail)}</li>`;
+  });
+  const jump = (checks.missing_paragraphs || []).slice(0, 12).map((p) =>
+    `<button type="button" class="check-para" data-index="${Number(p.index)}">${escapeHtml(p.label)}</button>`).join("");
+  return `<div class="checks"><div class="checks-title">자동 검사</div><ul>${items.join("")}</ul>${jump ? `<div class="check-jump">원문에서 보기 ${jump}</div>` : ""}</div>`;
+}
+
 /* ── 인용 클릭: 원문 강조 또는 참고자료 표시 ── */
 function onCiteClick(event) {
+  const jump = event.target.closest("button.check-para");
+  if (jump) { highlightParagraphs([Number(jump.dataset.index)]); return; }
   const button = event.target.closest("button.cite");
   if (!button) return;
   const [block, index] = button.dataset.cite.split(":");
@@ -256,7 +274,10 @@ async function openWork(id) {
   const data = await api(`/api/works/${encodeURIComponent(id)}`);
   const analyses = new Map();
   for (const a of data.analyses) analyses.set(`${a.kind}:${a.option}`, { ...a.result, cached: true });
-  state.current = { work: data.work, paragraphs: data.paragraphs, analyses, questions: data.questions };
+  state.current = {
+    work: data.work, paragraphs: data.paragraphs, analyses, questions: data.questions,
+    translateParts: data.translate_parts || [],
+  };
   state.kind = data.paragraphs.length ? "overview" : "guide";
   $("#empty-state").hidden = true;
   $("#work-view").hidden = false;
@@ -336,10 +357,26 @@ function renderKindTabs() {
       select.add(new Option(label, value));
     }
   }
+  renderPartSelect();
+}
+
+// 긴 글의 번역은 서버가 나눈 부분 단위로 요청한다(한 번의 응답 한도 안에서 빠짐없이 옮기기 위해)
+function renderPartSelect() {
+  const select = $("#translate-part");
+  const parts = state.current.translateParts;
+  select.hidden = state.kind !== "translate" || parts.length < 2;
+  if (select.dataset.work === state.current.work.id) return;
+  select.dataset.work = state.current.work.id;
+  select.innerHTML = "";
+  for (const p of parts) {
+    const range = p.from === p.to ? p.from : `${p.from}~${p.to}`;
+    select.add(new Option(`${p.part}/${parts.length}부분 (${range})`, String(p.part)));
+  }
 }
 
 function analysisKey() {
-  const option = state.kind === "translate" ? $("#translate-target").value : "";
+  const option = state.kind === "translate"
+    ? `${$("#translate-target").value}:${$("#translate-part").value || "1"}` : "";
   return { key: `${state.kind}:${option}`, option };
 }
 
@@ -763,6 +800,7 @@ async function init() {
   $("#run-analysis").addEventListener("click", () => runAnalysis(false));
   $("#refresh-analysis").addEventListener("click", () => runAnalysis(true));
   $("#translate-target").addEventListener("change", renderAnalysis);
+  $("#translate-part").addEventListener("change", renderAnalysis);
   $("#qa-form").addEventListener("submit", submitQuestion);
   $("#qa-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#qa-form").requestSubmit();
