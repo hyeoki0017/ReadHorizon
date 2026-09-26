@@ -150,6 +150,56 @@ TRANSLATE_TARGETS: dict[str, str] = {
 }
 
 
+# 독자 수준: 같은 원문도 읽는 사람에 따라 낱말·문장·개념어 풀이를 다르게 한다(PRD 4장 사용자 모드)
+AUDIENCES: dict[str, dict[str, str]] = {
+    "elementary": {
+        "label": "초등학생",
+        "guide": "초등학교 고학년이 이해할 수 있는 쉬운 낱말과 짧은 문장으로 씁니다. 어려운 말은 바로 뒤 괄호에 쉬운 말로 풀어 줍니다. 한자어·개념어는 꼭 필요할 때만 쓰고 뜻을 붙입니다.",
+    },
+    "middle": {
+        "label": "중학생",
+        "guide": "중학생 수준의 낱말로 씁니다. 화자·시점·비유 같은 개념어는 처음 나올 때 한 줄로 풀이합니다.",
+    },
+    "high": {
+        "label": "고등학생·수험생",
+        "guide": "고등학교 국어 교육과정의 개념어를 그대로 쓰고, 수능이 묻는 방식(근거가 되는 문장, 선택지 판단에 쓰이는 표현)과 연결해 설명합니다.",
+    },
+    "general": {
+        "label": "일반 독자",
+        "guide": "배경지식이 없는 성인 독자를 기준으로 씁니다. 전문 용어는 풀어 쓰고, 각 부분이 글 전체에서 하는 역할을 짚습니다.",
+    },
+    "expert": {
+        "label": "대학생·연구자",
+        "guide": "전공 용어를 그대로 쓰고 원어를 괄호로 병기합니다. 논지 구조·방법·한계와 해석상의 쟁점을 구체적으로 다룹니다.",
+    },
+}
+EXPLAIN_LANGUAGES: dict[str, str] = {"ko": "한국어", "en": "English"}
+
+
+@dataclass(frozen=True)
+class ReaderProfile:
+    """읽는 사람 설정. audience가 빈 문자열이면 지정 안 함."""
+
+    audience: str = ""
+    lang: str = "ko"
+
+    @classmethod
+    def of(cls, audience: str | None = "", lang: str | None = "ko") -> ReaderProfile:
+        return cls(audience if audience in AUDIENCES else "", lang if lang in EXPLAIN_LANGUAGES else "ko")
+
+    @property
+    def is_default(self) -> bool:
+        return not self.audience and self.lang == "ko"
+
+    @property
+    def suffix(self) -> str:
+        """저장된 분석 결과를 설정별로 구분하는 옵션 꼬리표. 기본 설정이면 빈 문자열(이전 결과와 호환)."""
+        return "" if self.is_default else f"@{self.audience or '-'}.{self.lang}"
+
+    def to_dict(self) -> dict:
+        return {"audience": self.audience, "lang": self.lang}
+
+
 def parse_translate_option(option: str | None) -> tuple[str, int]:
     """'en', 'en:2'(대상:부분 번호) → (대상, 부분). 모르는 대상은 쉬운 말 풀이, 잘못된 번호는 1부분."""
     target, _, part = (option or "").partition(":")

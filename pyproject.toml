@@ -32,7 +32,7 @@ readhorizon = "readhorizon.cli:main"
 include = ["readhorizon*"]
 
 [tool.setuptools.package-data]
-readhorizon = ["static/*"]
+readhorizon = ["static/*", "analysis/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

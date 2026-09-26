@@ -148,6 +148,8 @@ def test_sdk_round_trip_with_citations(fake_server, seosi_text):
     work_doc, intro_doc = body["messages"][0]["content"][:2]
     assert work_doc["source"]["type"] == "content" and len(work_doc["source"]["content"]) == 9
     assert work_doc["cache_control"] == {"type": "ephemeral"}
+    # 모범 해설 예시는 고정 시스템 프롬프트에 들어가 작품 원문과 함께 캐시된다
+    assert "모범 예시" in body["system"][0]["text"] and "<예시 " in body["system"][0]["text"]
     assert intro_doc["source"]["type"] == "text" and intro_doc["citations"] == {"enabled": True}
 
     citation = result["segments"][1]["citations"][0]

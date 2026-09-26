@@ -7,6 +7,7 @@
 2) 숫자: 원문의 두 자리 이상 숫자·소수가 번역에 없거나, 원문에 없는 숫자가 번역에 새로 나타남
    (한 자리 숫자는 'three'·'셋'처럼 풀어 쓰는 일이 많아 보지 않는다)
 3) 분량: 현대어 풀이·쉬운 말 풀이가 원문보다 지나치게 짧음(일부를 건너뛰었을 가능성)
+4) 용어집: 이 부분 원문에 나온 용어의 번역어가 번역에 없음(영어·한국어 번역만. 풀이는 활용형이 바뀌어 보지 않는다)
 """
 
 from __future__ import annotations
@@ -19,10 +20,11 @@ from .grounding import squash
 NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 # 위치 표시([3문단], [2연 1행], 3문단)와 가림·판독 표시 속 숫자는 비교에서 뺀다
 POSITION_RE = re.compile(r"\[[^\]\n]{1,20}\]|\d+\s*(?:문단|연|행)")
-VOCAB_HEADING_RE = re.compile(r"^\s*#{1,6}\s*어휘\s*풀이", re.MULTILINE)
+VOCAB_HEADING_RE = re.compile(r"^\s*#{1,6}\s*(?:어휘\s*풀이|vocabulary)", re.MULTILINE | re.IGNORECASE)
 HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s.*$", re.MULTILINE)
 # 같은 언어 안의 풀이에만 분량 비율을 본다(언어가 바뀌면 글자 수를 비교할 수 없음)
 MIN_LENGTH_RATIO = {"modern": 0.4, "easy": 0.3}
+GLOSSARY_CHECK_TARGETS = {"en", "ko"}
 MAX_LISTED = 12
 
 
@@ -54,7 +56,13 @@ def _listed(values: list[str]) -> str:
     return shown + (f" 외 {len(values) - MAX_LISTED}개" if len(values) > MAX_LISTED else "")
 
 
-def translation_checks(segments: list[dict], paragraphs: list[Paragraph], target: str) -> dict:
+def _fold(text: str) -> str:
+    return squash(text).casefold()
+
+
+def translation_checks(
+    segments: list[dict], paragraphs: list[Paragraph], target: str, glossary: list[dict] | None = None
+) -> dict:
     body = translation_segments(segments)
     text = "".join(seg.get("text") or "" for seg in body)
 
@@ -113,8 +121,28 @@ def translation_checks(segments: list[dict], paragraphs: list[Paragraph], target
                 }
             )
 
+    glossary_missed: list[dict] = []
+    if glossary and target in GLOSSARY_CHECK_TARGETS:
+        source = "".join(p.text for p in paragraphs)
+        used = [e for e in glossary if e.get("term") and e.get("rendering") and e["term"] in source]
+        if used:
+            folded = _fold(text)
+            glossary_missed = [{"term": e["term"], "rendering": e["rendering"]} for e in used if _fold(e["rendering"]) not in folded]
+            items.append(
+                {
+                    "id": "glossary",
+                    "status": "warn" if glossary_missed else "ok",
+                    "label": "용어집",
+                    "detail": "용어집과 다르게 옮긴 것으로 보이는 용어: "
+                    + _listed([f"{m['term']} → {m['rendering']}" for m in glossary_missed])
+                    if glossary_missed
+                    else f"이 부분에 나온 용어 {len(used)}개를 용어집대로 옮겼습니다",
+                }
+            )
+
     return {
         "ok": all(item["status"] == "ok" for item in items),
+        "glossary_missed": glossary_missed,
         "items": items,
         "missing_paragraphs": [{"index": p.index, "label": p.label} for p in missing],
         "missing_numbers": missing_numbers,

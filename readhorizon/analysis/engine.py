@@ -18,9 +18,18 @@ from ..references.store import ReferenceIndex
 from ..trust import INTRO_LABEL, INTRO_TIER, analysis_badge, tier_label
 from . import prompts
 from .checks import translation_checks
+from .glossary import GLOSSARY_SCHEMA, GLOSSARY_SYSTEM, MAX_EXTRACT, glossary_prompt, normalize_entries
 from .grounding import is_supported, strip_label, summarize
 from .llm import DocSpec, LLMClient, LLMResult
-from .presets import KINDS, TRANSLATE_TARGETS, Category, Genre, parse_translate_option, translate_option
+from .presets import (
+    KINDS,
+    TRANSLATE_TARGETS,
+    Category,
+    Genre,
+    ReaderProfile,
+    parse_translate_option,
+    translate_option,
+)
 
 DEFAULT_TRANSLATE_PART_CHARS = 6000
 
@@ -97,6 +106,12 @@ def split_parts(paragraphs: list[Paragraph], part_chars: int) -> list[list[Parag
     return parts
 
 
+def relevant_entries(entries: list[dict], paragraphs: list[Paragraph]) -> list[dict]:
+    """용어집 중 이번 부분 원문에 나오는 용어만 요청문에 넣는다(요청문 길이·비용 절약)."""
+    text = "".join(p.text for p in paragraphs)
+    return [e for e in entries if e.get("term") and e["term"] in text]
+
+
 class AnalysisEngine:
     def __init__(
         self,
@@ -104,11 +119,14 @@ class AnalysisEngine:
         references: ReferenceIndex | None,
         fulltext_char_limit: int,
         translate_part_chars: int = DEFAULT_TRANSLATE_PART_CHARS,
+        system_prompt: str | None = None,
     ) -> None:
         self.llm = llm
         self.references = references
         self.limit = fulltext_char_limit
         self.part_chars = translate_part_chars
+        # 모범 예시가 들어간 고정 시스템 프롬프트(작품 원문과 함께 캐시된다)
+        self.system_prompt = system_prompt or prompts.SYSTEM_PROMPT
 
     def translate_parts(self, paragraphs: list[Paragraph]) -> list[dict]:
         """화면에서 번역 범위를 고를 수 있도록 부분 목록을 돌려준다."""
@@ -231,7 +249,16 @@ class AnalysisEngine:
         }
 
     # ── 공개 메서드 ───────────────────────────────────────
-    def analyze(self, ctx: WorkContext, kind: str, option: str = "") -> dict:
+    def analyze(
+        self,
+        ctx: WorkContext,
+        kind: str,
+        option: str = "",
+        profile: ReaderProfile | None = None,
+        glossary: dict | None = None,
+    ) -> dict:
+        """profile: 독자 수준·설명 언어. glossary: 번역 용어집 {"entries": [...], "version": str}(번역에만 쓴다)."""
+        profile = profile or ReaderProfile()
         if kind not in KINDS:
             raise AnalysisRequestError("알 수 없는 분석 종류입니다.")
         if ctx.intro_only and KINDS[kind]["needs_text"]:
@@ -240,9 +267,9 @@ class AnalysisEngine:
                 "작품 해석이 필요하면 원문을 올려 주세요."
             )
         if kind == "translate":
-            return self._translate(ctx, option)
+            return self._translate(ctx, option, profile, glossary)
 
-        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre)
+        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre, profile)
         if kind == "overview":
             task, sections = prompts.overview_task(info, ctx.genre), list(ctx.genre.sections)
         elif kind == "flow":
@@ -254,10 +281,11 @@ class AnalysisEngine:
         docs, excerpted = self._documents(ctx, None, ref_query)
         if not docs:
             raise AnalysisRequestError("분석할 원문이나 소개글이 없습니다.")
-        result = self.llm.generate(prompts.SYSTEM_PROMPT, docs, task, {"kind": kind, "sections": sections})
-        return self._finish(ctx, result, docs, excerpted, {"kind": kind, "option": ""})
+        result = self.llm.generate(self.system_prompt, docs, task, {"kind": kind, "sections": sections})
+        extra = {"kind": kind, "option": profile.suffix, "profile": profile.to_dict()}
+        return self._finish(ctx, result, docs, excerpted, extra)
 
-    def _translate(self, ctx: WorkContext, option: str) -> dict:
+    def _translate(self, ctx: WorkContext, option: str, profile: ReaderProfile, glossary: dict | None) -> dict:
         target, number = parse_translate_option(option)
         parts = split_parts(ctx.paragraphs, self.part_chars)
         if number > len(parts):
@@ -269,29 +297,58 @@ class AnalysisEngine:
             if len(parts) > 1
             else ""
         )
-        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre)
-        task = prompts.translate_task(info, target, scope)
-        sections = [TRANSLATE_TARGETS[target], "어휘 풀이"]
+        entries = list((glossary or {}).get("entries") or [])
+        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre, profile)
+        task = prompts.translate_task(info, target, scope, profile.lang, relevant_entries(entries, selected))
+        sections = [TRANSLATE_TARGETS[target], prompts.VOCAB_HEADINGS[profile.lang]]
         ref_query = f"{ctx.title} {ctx.author or ''} {ctx.genre.label} {' '.join(sections)}"
         docs, _ = self._documents(ctx, None, ref_query, part=(selected, number, len(parts)))
-        result = self.llm.generate(prompts.SYSTEM_PROMPT, docs, task, {"kind": "translate", "sections": sections})
+        result = self.llm.generate(self.system_prompt, docs, task, {"kind": "translate", "sections": sections})
         extra = {
             "kind": "translate",
-            "option": translate_option(target, number),
+            "option": translate_option(target, number) + profile.suffix,
+            "profile": profile.to_dict(),
+            "glossary": {"version": (glossary or {}).get("version"), "count": len(entries)},
             "target": target,
             "part": number,
             "parts": len(parts),
             "part_range": {"from": selected[0].label, "to": selected[-1].label},
         }
         finished = self._finish(ctx, result, docs, False, extra)
-        finished["checks"] = translation_checks(finished["segments"], selected, target)
+        finished["checks"] = translation_checks(finished["segments"], selected, target, entries)
         return finished
 
-    def ask(self, ctx: WorkContext, question: str, multiple_choice: bool = False) -> dict:
+    def extract_glossary(self, ctx: WorkContext, target: str, part: int, existing: list[dict]) -> tuple[list[dict], dict]:
+        """한 부분에서 번역어를 정해 둘 용어를 뽑는다. 이미 있는 용어는 제외하고 새 용어만 돌려준다."""
+        if target not in TRANSLATE_TARGETS:
+            raise AnalysisRequestError("알 수 없는 번역 대상입니다.")
+        if not ctx.paragraphs:
+            raise AnalysisRequestError("원문이 없어 용어를 뽑을 수 없습니다.")
+        parts = split_parts(ctx.paragraphs, self.part_chars)
+        if not 1 <= part <= len(parts):
+            raise AnalysisRequestError(f"{part}부분은 없습니다. 이 작품의 번역 범위는 {len(parts)}부분입니다.")
+        selected = parts[part - 1]
+        result = self.llm.complete_json(
+            GLOSSARY_SYSTEM,
+            glossary_prompt(ctx.title, target, selected, existing),
+            GLOSSARY_SCHEMA,
+            {"kind": "glossary", "paragraphs": [p.text for p in selected]},
+        )
+        source = "".join(p.text for p in selected)
+        known = {e["term"] for e in existing}
+        # 원문에 없는 용어(모델이 지어낸 말)와 이미 정한 용어는 뺀다
+        new = [e for e in normalize_entries(result.data.get("entries"), "auto") if e["term"] in source and e["term"] not in known]
+        meta = {"model": result.model, "fallback_used": result.fallback_used, "usage": result.usage, "mode": self.llm.mode}
+        return new[:MAX_EXTRACT], meta
+
+    def ask(
+        self, ctx: WorkContext, question: str, multiple_choice: bool = False, profile: ReaderProfile | None = None
+    ) -> dict:
+        profile = profile or ReaderProfile()
         question = question.strip()
         if not question:
             raise AnalysisRequestError("질문을 입력해 주세요.")
-        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre)
+        info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre, profile)
         task = prompts.ask_task(info, question)
         if ctx.intro_only:
             task += "\n- 작품 원문이 없습니다. 소개글에 있는 내용만 '소개글에 따르면'으로 한정해 답하고, 작품 해석은 하지 않습니다."
@@ -299,5 +356,7 @@ class AnalysisEngine:
         if not docs:
             raise AnalysisRequestError("분석할 원문이나 소개글이 없습니다.")
         meta = {"kind": "ask", "question": question, "multiple_choice": multiple_choice}
-        result = self.llm.generate(prompts.SYSTEM_PROMPT, docs, task, meta)
-        return self._finish(ctx, result, docs, excerpted, {"kind": "ask", "question": question})
+        result = self.llm.generate(self.system_prompt, docs, task, meta)
+        return self._finish(
+            ctx, result, docs, excerpted, {"kind": "ask", "question": question, "profile": profile.to_dict()}
+        )

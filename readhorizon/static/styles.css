@@ -257,6 +257,23 @@ select, input, textarea {
 .badge-medium { color: var(--warn); }
 .badge-low { color: var(--low); }
 .badge-intro { color: var(--intro); }
+.reader-profile { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.reader-profile label { display: flex; align-items: center; gap: 6px; }
+.reader-profile select { width: auto; font-size: 13px; padding: 4px 8px; }
+.glossary { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.glossary summary { cursor: pointer; font-weight: 600; }
+.glossary .muted { color: var(--muted); font-weight: 400; }
+.glossary-rows { display: grid; gap: 6px; margin: 8px 0; }
+.glossary-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }
+.glossary-row input { font-size: 13px; padding: 5px 8px; min-width: 0; }
+.glossary-row.auto input { border-style: dashed; }
+.glossary-row .g-del { padding: 4px 8px; }
+.glossary-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.note.stale { color: var(--warn); }
+@media (max-width: 640px) {
+  .glossary-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .glossary-row .g-note { grid-column: 1 / span 2; }
+}
 .checks { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
 .checks-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .checks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

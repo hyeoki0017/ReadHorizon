@@ -65,6 +65,10 @@
           <div>
             <h1 id="work-title"></h1>
             <p id="work-meta" class="work-meta"></p>
+            <div class="reader-profile" title="분석·번역·질의응답을 읽는 사람에 맞춰 설명합니다">
+              <label>읽는 사람 <select id="audience"></select></label>
+              <label>설명 언어 <select id="explain-lang"></select></label>
+            </div>
           </div>
           <button id="delete-work-btn" type="button" class="btn ghost danger">삭제</button>
         </div>
@@ -91,6 +95,16 @@
               <button id="run-analysis" type="button" class="btn primary">분석하기</button>
               <button id="refresh-analysis" type="button" class="btn ghost" hidden>다시 분석</button>
             </div>
+            <details id="glossary-panel" class="glossary" hidden>
+              <summary>용어집 <span id="glossary-count" class="muted"></span></summary>
+              <p class="hint">인명·지명·고어·전문 용어의 번역어를 정해 두면 모든 부분에서 같은 말로 옮깁니다. 번역 대상마다 따로 저장됩니다.</p>
+              <div id="glossary-rows" class="glossary-rows"></div>
+              <div class="glossary-actions">
+                <button id="glossary-extract" type="button" class="btn ghost">이 부분에서 용어 뽑기</button>
+                <button id="glossary-add" type="button" class="btn ghost">행 추가</button>
+                <button id="glossary-save" type="button" class="btn primary">용어집 저장</button>
+              </div>
+            </details>
             <div id="analysis-body" class="analysis-body"></div>
           </section>
 

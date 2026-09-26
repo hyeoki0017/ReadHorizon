@@ -6,7 +6,8 @@
   {"id", "title", "author"(선택), "category", "genre", "passage",
    "kind": "overview"|"flow"|"translate"|"guide", "option": 번역 대상(translate일 때: modern·easy·en·ko),
    "key_points": ["결과가 반드시 짚어야 할 내용", ...],
-   "reference": "모범 번역·해설(선택)", "audience": "대상 독자(선택, 예: 고등학생)",
+   "reference": "모범 번역·해설(선택)",
+   "audience": 독자 수준(선택: elementary·middle·high·general·expert), "lang": 설명 언어(선택: ko·en),
    "source": "출처·이용 조건"}
 
 채점 방식
@@ -27,7 +28,15 @@ from typing import Protocol
 
 from .analysis.engine import AnalysisEngine, WorkContext
 from .analysis.llm import JSONResult
-from .analysis.presets import KINDS, TRANSLATE_TARGETS, find_genre, parse_translate_option
+from .analysis.presets import (
+    AUDIENCES,
+    EXPLAIN_LANGUAGES,
+    KINDS,
+    TRANSLATE_TARGETS,
+    ReaderProfile,
+    find_genre,
+    parse_translate_option,
+)
 from .ingest.normalize import looks_like_verse, normalize_text
 
 ERROR_CATEGORIES = ["누락", "추가", "오역", "용어", "어색함", "문체", "사실 오류", "근거 없는 주장", "해석 단정"]
@@ -114,6 +123,10 @@ def load_items(path: Path) -> list[dict]:
         points = item["key_points"]
         if not isinstance(points, list) or not points or not all(isinstance(p, str) and p.strip() for p in points):
             raise QualityEvalError(f"{i}번째 문항의 key_points는 비어 있지 않은 문자열 목록이어야 합니다.")
+        if item.get("audience", "") not in ("", *AUDIENCES):
+            raise QualityEvalError(f"{i}번째 문항의 audience는 {', '.join(AUDIENCES)} 중 하나여야 합니다.")
+        if item.get("lang", "ko") not in EXPLAIN_LANGUAGES:
+            raise QualityEvalError(f"{i}번째 문항의 lang은 {', '.join(EXPLAIN_LANGUAGES)} 중 하나여야 합니다.")
         if find_genre(item.get("category", "study"), item.get("genre", "csat_literature")) is None:
             raise QualityEvalError(f"{i}번째 문항의 카테고리·장르가 올바르지 않습니다.")
     return items
@@ -124,6 +137,10 @@ def _context(item: dict) -> WorkContext:
     verse = genre.verse == "yes" or (genre.verse == "auto" and looks_like_verse(item["passage"]))
     paragraphs = normalize_text(item["passage"], verse)
     return WorkContext(item.get("title") or str(item["id"]), item.get("author"), category, genre, paragraphs, None)
+
+
+def _profile(item: dict) -> ReaderProfile:
+    return ReaderProfile.of(item.get("audience", ""), item.get("lang", "ko"))
 
 
 def rendered_output(result: dict) -> str:
@@ -146,7 +163,10 @@ def judge_prompt(item: dict, ctx: WorkContext, result: dict) -> str:
         task = KINDS[kind]["label"]
     passage = "\n".join(f"[{p.label}] {p.text}" for p in ctx.paragraphs)
     points = "\n".join(f"{n}. {p.strip()}" for n, p in enumerate(item["key_points"], start=1))
-    audience = f"\n[대상 독자] {item['audience']}" if item.get("audience") else ""
+    profile = _profile(item)
+    audience = f"\n[대상 독자] {AUDIENCES[profile.audience]['label']}" if profile.audience else ""
+    if profile.lang != "ko":
+        audience += f"\n[설명 언어] {EXPLAIN_LANGUAGES[profile.lang]}"
     reference = f"\n\n<모범 답안>\n{item['reference']}\n</모범 답안>" if item.get("reference") else ""
     return f"""[작품] {ctx.title}{f' — {ctx.author}' if ctx.author else ''} ({ctx.category.label} > {ctx.genre.label})
 [과제] {task}{audience}
@@ -260,7 +280,7 @@ def run_quality_eval(engine: AnalysisEngine, judge: JudgeClient | None, items: l
     for item, ctx in zip(items, contexts, strict=True):
         kind = item["kind"]
         option = f"{item.get('option', 'easy')}:1" if kind == "translate" else ""
-        result = engine.analyze(ctx, kind, option)
+        result = engine.analyze(ctx, kind, option, _profile(item))
         _add_usage(usage["generation"], result.get("usage"))
         row = {
             "id": item["id"],

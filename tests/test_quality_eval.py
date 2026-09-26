@@ -78,6 +78,8 @@ def _item(**over):
         ({"kind": "translate", "option": "fr"}, "번역 대상"),
         ({"passage": "  "}, "passage"),
         ({"genre": "unknown"}, "장르"),
+        ({"audience": "고등학생"}, "audience"),
+        ({"lang": "fr"}, "lang"),
     ],
 )
 def test_load_items_rejects_invalid(tmp_path, override, message):
@@ -104,7 +106,7 @@ def test_score_judgement_defaults_missing_points_to_no_and_ignores_bad_entries()
 
 def test_run_quality_eval_combines_judge_and_automatic_checks(tmp_path, seosi_text):
     items = [
-        _item(id="ov", passage=seosi_text, key_points=["소망", "성찰"], reference="모범 해설", audience="고등학생"),
+        _item(id="ov", passage=seosi_text, key_points=["소망", "성찰"], reference="모범 해설", audience="high"),
         _item(id="tr", passage=seosi_text, kind="translate", option="en", key_points=["소망", "바람"]),
     ]
     judge = FakeJudge()
@@ -123,7 +125,7 @@ def test_run_quality_eval_combines_judge_and_automatic_checks(tmp_path, seosi_te
     prompt = judge.prompts[0]
     assert "<원문>\n[1연 1행] 죽는 날까지 하늘을 우러러" in prompt
     assert "풀이 1 [근거: 1연 1행]" in prompt
-    assert "<모범 답안>\n모범 해설\n</모범 답안>" in prompt and "[대상 독자] 고등학생" in prompt
+    assert "<모범 답안>\n모범 해설\n</모범 답안>" in prompt and "[대상 독자] 고등학생·수험생" in prompt
     assert "1. 소망\n2. 성찰" in prompt
     assert "영어 번역" in judge.prompts[1]
 

@@ -337,3 +337,4 @@ def test_work_deleted_during_analysis_returns_404(settings, store, workspace, se
 def test_privacy_notice_mentions_transient_ip_use(client, workspace):
     items = [i["item"] for i in client.get("/api/privacy/notice", headers=workspace).json()["collected_items"]]
     assert "접속 IP" in items
+    assert "번역 용어집(작품별 용어·번역어·메모)" in items and "읽는 사람 설정(독자 수준·설명 언어)" in items

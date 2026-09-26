@@ -15,7 +15,7 @@ def build_notice(masking_counts: dict[str, int], retention_days: int, bib_enable
         external.append(
             {
                 "recipient": "Anthropic (Claude API)",
-                "items": "마스킹된 원문, 사용자 제공 책 소개, 질문, 텍스트 추출용 이미지·스캔 PDF(메타데이터 제거)",
+                "items": "마스킹된 원문, 사용자 제공 책 소개, 질문, 번역 용어집, 텍스트 추출용 이미지·스캔 PDF(메타데이터 제거)",
                 "purpose": "텍스트 분석·질의응답·이미지 글자 추출",
             }
         )
@@ -33,6 +33,8 @@ def build_notice(masking_counts: dict[str, int], retention_days: int, bib_enable
             {"item": "책 소개 텍스트·출처 URL (선택)", "purpose": "읽기 가이드·작품 식별 보조", "retention": f"마지막 이용 후 {retention_days}일"},
             {"item": "텍스트 추출용 이미지·스캔 PDF (선택)", "purpose": "글자 추출(OCR)", "retention": "저장하지 않음 · 위치 정보 등 메타데이터 제거 후 전송"},
             {"item": "질문 내용·분석 결과", "purpose": "결과 다시 보기", "retention": f"마지막 이용 후 {retention_days}일"},
+            {"item": "번역 용어집(작품별 용어·번역어·메모)", "purpose": "번역어를 모든 부분에서 같게 유지", "retention": f"마지막 이용 후 {retention_days}일"},
+            {"item": "읽는 사람 설정(독자 수준·설명 언어)", "purpose": "설명 수준 맞춤", "retention": "이 브라우저에만 저장 · 서버는 요청을 처리할 때만 사용"},
             {"item": "자료실 ID (브라우저가 만든 무작위 값)", "purpose": "내 자료 구분", "retention": "브라우저 저장소를 지우면 연결이 끊김"},
             {"item": "접속 IP", "purpose": "과도한 요청 제한(비용·서비스 보호)", "retention": "메모리에서 최근 1분만 사용, 저장하지 않음"},
         ],

@@ -65,6 +65,8 @@ class Settings:
     # 품질 평가(eval-quality) 채점 모델·effort. 모델을 비우면 분석 모델과 같은 모델을 쓴다
     judge_model: str | None = None
     judge_effort: str = "high"
+    # 모범 해설 예시 파일(JSON). 비우면 패키지에 든 기본 예시를 쓴다. 교사·전문가가 쓴 예시로 바꿀 때 지정
+    exemplars_path: Path | None = None
 
     @property
     def bib_enabled(self) -> bool:
@@ -109,4 +111,5 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
         translate_part_chars=min(20_000, max(1000, _int_env("RH_TRANSLATE_PART_CHARS", 6000))),
         judge_model=os.getenv("RH_JUDGE_MODEL", "").strip() or None,
         judge_effort=judge_effort,
+        exemplars_path=Path(os.getenv("RH_EXEMPLARS_PATH", "").strip()) if os.getenv("RH_EXEMPLARS_PATH", "").strip() else None,
     )

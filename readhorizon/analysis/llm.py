@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -118,6 +119,8 @@ class LLMClient(Protocol):
 
     def transcribe(self, images: list[bytes], pdf: bytes | None, system: str, task: str) -> OCRResult: ...
 
+    def complete_json(self, system: str, prompt: str, schema: dict, meta: dict | None = None) -> JSONResult: ...
+
 
 class ClaudeClient:
     mode = "live"
@@ -202,8 +205,8 @@ class ClaudeClient:
     def generate(self, system: str, docs: list[DocSpec], task: str, meta: dict) -> LLMResult:
         return parse_message(self._stream(self.build_request(system, docs, task)))
 
-    def complete_json(self, system: str, prompt: str, schema: dict) -> JSONResult:
-        """구조화 출력으로 JSON 객체를 받는다(품질 평가 채점 등)."""
+    def complete_json(self, system: str, prompt: str, schema: dict, meta: dict | None = None) -> JSONResult:
+        """구조화 출력으로 JSON 객체를 받는다(용어 뽑기, 품질 평가 채점 등). meta는 데모 응답용."""
         return parse_json_message(self._stream(self.build_json_request(system, prompt, schema)))
 
     def transcribe(self, images: list[bytes], pdf: bytes | None, system: str, task: str) -> OCRResult:
@@ -334,6 +337,21 @@ class DemoClient:
             notes=["데모 응답입니다. [?]는 판독이 불확실한 글자를 나타냅니다."],
             model=self.model,
         )
+
+    def complete_json(self, system: str, prompt: str, schema: dict, meta: dict | None = None) -> JSONResult:
+        if (meta or {}).get("kind") != "glossary":
+            raise LLMError("데모 모드에서는 이 기능을 쓸 수 없습니다. ANTHROPIC_API_KEY를 설정해 주세요.")
+        # 용어 뽑기 흐름을 확인하기 위한 결정적 응답: 원문에서 처음 나오는 두 글자 이상 낱말 3개
+        words: list[str] = []
+        for text in meta.get("paragraphs") or []:
+            for word in re.findall(r"[가-힣]{2,}", text):
+                if word not in words:
+                    words.append(word)
+        entries = [
+            {"term": w, "rendering": f"(데모) {w}", "note": "데모 응답입니다. 실제 번역어가 아닙니다.", "kind": "기타"}
+            for w in words[:3]
+        ]
+        return JSONResult({"entries": entries}, self.model)
 
     def generate(self, system: str, docs: list[DocSpec], task: str, meta: dict) -> LLMResult:
         work_index = next((i for i, d in enumerate(docs) if d.role == "work"), None)

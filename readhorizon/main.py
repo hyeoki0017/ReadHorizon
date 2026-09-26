@@ -18,9 +18,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .analysis.engine import AnalysisEngine, AnalysisRequestError, WorkContext
 from .analysis.llm import ClaudeClient, DemoClient, LLMClient, LLMError, LLMRefusal
+from .analysis import prompts
+from .analysis.glossary import FIELD_LIMITS, MAX_ENTRIES, merge_entries, normalize_entries
 from .analysis.presets import (
+    AUDIENCES,
+    EXPLAIN_LANGUAGES,
     KINDS,
     TRANSLATE_TARGETS,
+    ReaderProfile,
     categories_payload,
     find_genre,
     parse_translate_option,
@@ -56,12 +61,33 @@ CSP = (
 
 class AnalyzeBody(BaseModel):
     kind: str
-    option: str = ""
+    option: str = Field(default="", max_length=40)
     refresh: bool = False
+    audience: str = Field(default="", max_length=20)
+    lang: str = Field(default="ko", max_length=5)
 
 
 class AskBody(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
+    audience: str = Field(default="", max_length=20)
+    lang: str = Field(default="ko", max_length=5)
+
+
+class GlossaryEntryBody(BaseModel):
+    term: str = Field(max_length=FIELD_LIMITS["term"] * 2)
+    rendering: str = Field(max_length=FIELD_LIMITS["rendering"] * 2)
+    note: str = Field(default="", max_length=FIELD_LIMITS["note"] * 2)
+    kind: str = Field(default="기타", max_length=20)
+    source: str = Field(default="user", max_length=10)
+
+
+class GlossaryBody(BaseModel):
+    entries: list[GlossaryEntryBody] = Field(max_length=MAX_ENTRIES)
+
+
+class GlossaryExtractBody(BaseModel):
+    target: str = Field(max_length=20)
+    part: int = Field(default=1, ge=1, le=10_000)
 
 
 class RequestSizeLimitMiddleware:
@@ -143,7 +169,10 @@ def create_app(
         )
     if bib_client is None and settings.nl_cert_key:
         bib_client = NationalLibraryClient(settings.nl_cert_key)
-    engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit, settings.translate_part_chars)
+    system_prompt = prompts.build_system_prompt(prompts.load_exemplars(settings.exemplars_path))
+    engine = AnalysisEngine(
+        llm, ReferenceIndex(store), settings.fulltext_char_limit, settings.translate_part_chars, system_prompt
+    )
     llm_limiter = RateLimiter(settings.llm_per_minute, settings.llm_daily)
     create_limiter = RateLimiter(settings.create_per_minute)
     upload_limit = settings.max_upload_mb * 1024 * 1024
@@ -213,6 +242,8 @@ def create_app(
             "categories": categories_payload(),
             "kinds": {k: v["label"] for k, v in KINDS.items()},
             "translate_targets": TRANSLATE_TARGETS,
+            "audiences": {k: v["label"] for k, v in AUDIENCES.items()},
+            "explain_languages": EXPLAIN_LANGUAGES,
         }
 
     @app.get("/api/bib/search")
@@ -356,15 +387,18 @@ def create_app(
         _, ctx = load_context(ws, work_id)
         if body.kind not in KINDS:
             raise HTTPException(status_code=422, detail="알 수 없는 분석 종류입니다.")
-        option = ""
+        profile = ReaderProfile.of(body.audience, body.lang)
+        base, glossary = "", None
         if body.kind == "translate":
-            option = translate_option(*parse_translate_option(body.option))
+            target, part = parse_translate_option(body.option)
+            base, glossary = translate_option(target, part), store.get_glossary(work_id, target)
+        option = base + profile.suffix
         if not body.refresh:
             cached = store.get_analysis(work_id, body.kind, option)
             if cached is not None:
                 return {**cached, "cached": True}
         enforce(llm_limiter, request)
-        result = engine.analyze(ctx, body.kind, option)
+        result = engine.analyze(ctx, body.kind, base, profile, glossary)
         try:
             store.save_analysis(work_id, body.kind, result["option"], result)
         except sqlite3.IntegrityError:
@@ -378,12 +412,67 @@ def create_app(
         if not masked.text:
             raise HTTPException(status_code=422, detail="질문을 입력해 주세요.")
         enforce(llm_limiter, request)
-        result = engine.ask(ctx, masked.text, bool(MULTIPLE_CHOICE_RE.search(masked.text)))
+        profile = ReaderProfile.of(body.audience, body.lang)
+        result = engine.ask(ctx, masked.text, bool(MULTIPLE_CHOICE_RE.search(masked.text)), profile)
         try:
             qid = store.save_question(ws, work_id, masked.text, result, masked.counts)
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=404, detail="답변 중에 작품이 삭제되었습니다.") from None
         return {"id": qid, "question": masked.text, "result": result}
+
+    # ── 번역 용어집 ───────────────────────────────────────
+    def glossary_target(target: str) -> str:
+        if target not in TRANSLATE_TARGETS:
+            raise HTTPException(status_code=422, detail="알 수 없는 번역 대상입니다.")
+        return target
+
+    def glossary_payload(target: str, saved: dict | None) -> dict:
+        saved = saved or {"entries": [], "version": None, "updated_at": None}
+        return {"target": target, **saved}
+
+    def masked_entries(ws: str, entries: list[dict]) -> list[dict]:
+        """용어집 글자에도 민감정보 가림을 적용하고, 가린 항목의 개수만 기록한다."""
+        results = []
+        cleaned = []
+        for entry in entries:
+            fields = {}
+            for key in FIELD_LIMITS:
+                result = mask(entry[key])
+                fields[key] = result.text
+                results.append(result)
+            cleaned.append({**entry, **fields})
+        store.log_masking(ws, merge_counts(*results))
+        return normalize_entries(cleaned, "user")
+
+    @app.get("/api/works/{work_id}/glossary")
+    def get_glossary(work_id: str, target: str, ws: str = Depends(workspace_id)) -> dict:
+        load_context(ws, work_id)
+        target = glossary_target(target)
+        return glossary_payload(target, store.get_glossary(work_id, target))
+
+    @app.put("/api/works/{work_id}/glossary")
+    def put_glossary(work_id: str, target: str, body: GlossaryBody, ws: str = Depends(workspace_id)) -> dict:
+        load_context(ws, work_id)
+        target = glossary_target(target)
+        entries = masked_entries(ws, normalize_entries([e.model_dump() for e in body.entries], "user"))
+        try:
+            return glossary_payload(target, store.save_glossary(work_id, target, entries))
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=404, detail="작품이 삭제되었습니다.") from None
+
+    @app.post("/api/works/{work_id}/glossary/extract")
+    def extract_glossary(work_id: str, body: GlossaryExtractBody, request: Request, ws: str = Depends(workspace_id)) -> dict:
+        _, ctx = load_context(ws, work_id)
+        target = glossary_target(body.target)
+        existing = (store.get_glossary(work_id, target) or {}).get("entries") or []
+        enforce(llm_limiter, request)
+        new, meta = engine.extract_glossary(ctx, target, body.part, existing)
+        entries = merge_entries(existing, masked_entries(ws, new))
+        try:
+            saved = store.save_glossary(work_id, target, entries)
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=404, detail="작품이 삭제되었습니다.") from None
+        return {**glossary_payload(target, saved), "added": len(entries) - len(existing), **meta}
 
     # ── 이미지·스캔 PDF 텍스트 추출(OCR) ─────────────────
     @app.post("/api/ocr")

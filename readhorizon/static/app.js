@@ -16,6 +16,7 @@ const state = {
   citeSeq: 0,
   bibSelected: null,
   ocr: null, // 마지막 텍스트 추출 결과(확인 전에는 저장하지 않음)
+  profile: { audience: "", lang: "ko" }, // 읽는 사람 설정(이 브라우저에만 기억)
 };
 
 /* ── 자료실 ID: 브라우저가 만든 무작위 값(계정 정보 없음) ── */
@@ -38,6 +39,56 @@ function loadWorkspace() {
   } catch (_) {
     return randomId(); // 저장소를 쓸 수 없으면 이번 방문 동안만 유지
   }
+}
+
+/* ── 읽는 사람 설정: 독자 수준·설명 언어(이 브라우저에만 기억, 서버에는 요청할 때만 보냄) ── */
+function loadProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("rh.profile") || "{}");
+    return {
+      audience: typeof saved.audience === "string" ? saved.audience : "",
+      lang: typeof saved.lang === "string" ? saved.lang : "ko",
+    };
+  } catch (_) {
+    return { audience: "", lang: "ko" };
+  }
+}
+
+function saveProfile() {
+  try { localStorage.setItem("rh.profile", JSON.stringify(state.profile)); } catch (_) { /* 저장소 없음 */ }
+}
+
+// 서버의 ReaderProfile.suffix와 같은 규칙(저장된 결과를 설정별로 구분)
+function profileSuffix() {
+  const { audience, lang } = state.profile;
+  return !audience && lang === "ko" ? "" : `@${audience || "-"}.${lang}`;
+}
+
+function renderProfileControls() {
+  const audience = $("#audience");
+  const lang = $("#explain-lang");
+  if (!audience.options.length) {
+    audience.add(new Option("지정 안 함", ""));
+    for (const [value, label] of Object.entries(state.meta.audiences || {})) audience.add(new Option(label, value));
+    for (const [value, label] of Object.entries(state.meta.explain_languages || {})) lang.add(new Option(label, value));
+  }
+  if (!Array.from(audience.options).some((o) => o.value === state.profile.audience)) state.profile.audience = "";
+  if (!Array.from(lang.options).some((o) => o.value === state.profile.lang)) state.profile.lang = "ko";
+  audience.value = state.profile.audience;
+  lang.value = state.profile.lang;
+}
+
+function onProfileChange() {
+  state.profile = { audience: $("#audience").value, lang: $("#explain-lang").value };
+  saveProfile();
+  if (state.current) renderAnalysis();
+}
+
+function profileLabel(p) {
+  if (!p || (!p.audience && (!p.lang || p.lang === "ko"))) return "";
+  const audience = p.audience ? (state.meta.audiences || {})[p.audience] || p.audience : "지정 안 함";
+  const lang = (state.meta.explain_languages || {})[p.lang] || p.lang;
+  return `읽는 사람 ${audience} · 설명 ${lang}`;
 }
 
 /* ── 공통 ── */
@@ -181,6 +232,8 @@ function resultHtml(result, { showBadge = true } = {}) {
   else if (result.model) meta.push(`모델 ${escapeHtml(result.model)}${result.fallback_used ? " (대체 모델)" : ""}`);
   if (result.cached) meta.push("저장된 결과");
   if (result.truncated) meta.push("응답이 길어 중간에 끊겼습니다");
+  const who = profileLabel(result.profile);
+  if (who) meta.push(escapeHtml(who));
   if (result.parts > 1 && result.part_range) {
     meta.push(`${Number(result.part)}/${Number(result.parts)}부분 (${escapeHtml(result.part_range.from)}~${escapeHtml(result.part_range.to)})`);
   }
@@ -277,6 +330,8 @@ async function openWork(id) {
   state.current = {
     work: data.work, paragraphs: data.paragraphs, analyses, questions: data.questions,
     translateParts: data.translate_parts || [],
+    glossaries: new Map(), // 번역 대상 → { entries, version }
+    glossaryLoading: new Set(),
   };
   state.kind = data.paragraphs.length ? "overview" : "guide";
   $("#empty-state").hidden = true;
@@ -374,15 +429,19 @@ function renderPartSelect() {
   }
 }
 
+function currentTarget() {
+  return $("#translate-target").value || "easy";
+}
+
 function analysisKey() {
-  const option = state.kind === "translate"
-    ? `${$("#translate-target").value}:${$("#translate-part").value || "1"}` : "";
-  return { key: `${state.kind}:${option}`, option };
+  const option = state.kind === "translate" ? `${currentTarget()}:${$("#translate-part").value || "1"}` : "";
+  return { key: `${state.kind}:${option}${profileSuffix()}`, option };
 }
 
 function renderAnalysis() {
   const { key } = analysisKey();
   const result = state.current.analyses.get(key);
+  syncGlossary();
   const body = $("#analysis-body");
   $("#refresh-analysis").hidden = !result;
   $("#run-analysis").hidden = Boolean(result);
@@ -391,7 +450,7 @@ function renderAnalysis() {
     body.innerHTML = `<p class="loading">'${escapeHtml(label)}'을(를) 실행하면 원문 인용과 함께 결과가 표시됩니다.</p>`;
     return;
   }
-  body.innerHTML = `<div class="result">${resultHtml(result)}</div>`;
+  body.innerHTML = `<div class="result">${glossaryNote(result)}${resultHtml(result)}</div>`;
 }
 
 async function runAnalysis(refresh) {
@@ -399,6 +458,7 @@ async function runAnalysis(refresh) {
   const current = state.current;
   const kind = state.kind;
   const { key, option } = analysisKey();
+  const profile = { ...state.profile };
   const stillShowing = () => state.current === current && analysisKey().key === key;
   const buttons = [$("#run-analysis"), $("#refresh-analysis")];
   buttons.forEach((b) => { b.disabled = true; });
@@ -406,7 +466,7 @@ async function runAnalysis(refresh) {
   try {
     const result = await api(`/api/works/${current.work.id}/analyze`, {
       method: "POST",
-      json: { kind, option, refresh },
+      json: { kind, option, refresh, audience: profile.audience, lang: profile.lang },
     });
     current.analyses.set(key, result);
     if (stillShowing()) renderAnalysis();
@@ -416,6 +476,132 @@ async function runAnalysis(refresh) {
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
   }
+}
+
+/* ── 번역 용어집: 번역 대상마다 저장, 저장하지 않은 수정은 다시 그리지 않고 유지 ── */
+async function loadGlossary(target) {
+  const current = state.current;
+  if (current.glossaryLoading.has(target)) return;
+  current.glossaryLoading.add(target);
+  try {
+    const data = await api(`/api/works/${current.work.id}/glossary?target=${encodeURIComponent(target)}`);
+    current.glossaries.set(target, data);
+    if (state.current === current) renderAnalysis();
+  } catch (error) {
+    // 실패한 대상은 빈 용어집으로 두어 다시 그릴 때마다 요청·알림이 반복되지 않게 한다(작품을 다시 열면 재시도)
+    current.glossaries.set(target, { entries: [], version: null, updated_at: null });
+    toast(error.message);
+  } finally {
+    current.glossaryLoading.delete(target);
+  }
+}
+
+function syncGlossary() {
+  const panel = $("#glossary-panel");
+  const show = state.kind === "translate" && state.current.paragraphs.length > 0;
+  panel.hidden = !show;
+  if (!show) return;
+  const target = currentTarget();
+  const glossary = state.current.glossaries.get(target);
+  if (!glossary) {
+    $("#glossary-count").textContent = "";
+    loadGlossary(target);
+    return;
+  }
+  const shown = `${state.current.work.id}:${target}:${glossary.version}`;
+  if (panel.dataset.shown === shown) return; // 저장하지 않은 수정을 지우지 않는다
+  panel.dataset.shown = shown;
+  panel.dataset.dirty = "";
+  $("#glossary-count").textContent = `${glossary.entries.length}개`;
+  const rows = $("#glossary-rows");
+  rows.innerHTML = glossary.entries.length ? "" : '<p class="hint">아직 정한 용어가 없습니다.</p>';
+  glossary.entries.forEach((entry) => addGlossaryRow(entry));
+}
+
+function addGlossaryRow(entry = { term: "", rendering: "", note: "", kind: "기타", source: "user" }) {
+  const rows = $("#glossary-rows");
+  const empty = $(".hint", rows);
+  if (empty) empty.remove();
+  const row = document.createElement("div");
+  row.className = "glossary-row";
+  row.dataset.kind = entry.kind || "기타";
+  row.dataset.source = entry.source || "user";
+  row.innerHTML = `<input class="g-term" maxlength="60" placeholder="원문 용어" aria-label="원문 용어">
+    <input class="g-rendering" maxlength="120" placeholder="번역어" aria-label="번역어">
+    <input class="g-note" maxlength="200" placeholder="메모(뜻·옮긴 이유)" aria-label="메모">
+    <button type="button" class="btn ghost g-del" aria-label="이 용어 지우기" title="지우기">✕</button>`;
+  $(".g-term", row).value = entry.term || "";
+  $(".g-rendering", row).value = entry.rendering || "";
+  $(".g-note", row).value = entry.note || "";
+  if (entry.source === "auto") row.classList.add("auto");
+  rows.appendChild(row);
+  return row;
+}
+
+function glossaryRowsData() {
+  return $$("#glossary-rows .glossary-row")
+    .map((row) => ({
+      term: $(".g-term", row).value.trim(),
+      rendering: $(".g-rendering", row).value.trim(),
+      note: $(".g-note", row).value.trim(),
+      kind: row.dataset.kind,
+      source: row.dataset.source,
+    }))
+    .filter((e) => e.term && e.rendering);
+}
+
+async function saveGlossary({ quiet = false } = {}) {
+  const current = state.current;
+  const target = currentTarget();
+  const button = $("#glossary-save");
+  button.disabled = true;
+  try {
+    const data = await api(`/api/works/${current.work.id}/glossary?target=${encodeURIComponent(target)}`, {
+      method: "PUT",
+      json: { entries: glossaryRowsData() },
+    });
+    current.glossaries.set(target, data);
+    if (state.current === current) renderAnalysis();
+    if (!quiet) toast(`용어집을 저장했습니다(${data.entries.length}개).`);
+    return true;
+  } catch (error) {
+    toast(error.message);
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function extractGlossary() {
+  const current = state.current;
+  const target = currentTarget();
+  const part = Number($("#translate-part").value || "1");
+  const button = $("#glossary-extract");
+  if ($("#glossary-panel").dataset.dirty && !(await saveGlossary({ quiet: true }))) return;
+  button.disabled = true;
+  button.textContent = "용어를 뽑는 중…";
+  try {
+    const data = await api(`/api/works/${current.work.id}/glossary/extract`, { method: "POST", json: { target, part } });
+    current.glossaries.set(target, data);
+    if (state.current === current) renderAnalysis();
+    toast(data.added
+      ? `새 용어 ${data.added}개를 추가했습니다. 번역어를 확인하고 필요하면 고쳐서 저장하세요.`
+      : "새로 추가할 용어가 없습니다.");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "이 부분에서 용어 뽑기";
+  }
+}
+
+function glossaryNote(result) {
+  if (result.kind !== "translate") return "";
+  const glossary = state.current.glossaries.get(result.target || currentTarget());
+  if (!glossary) return "";
+  const used = (result.glossary && result.glossary.version) || null;
+  if ((glossary.version || null) === used) return "";
+  return '<p class="note stale">용어집이 이 결과를 만든 뒤 바뀌었습니다. \'다시 분석\'을 누르면 지금 용어집으로 옮깁니다.</p>';
 }
 
 /* ── 질의응답 ── */
@@ -447,7 +633,10 @@ async function submitQuestion(event) {
   list.appendChild(pending);
   pending.scrollIntoView({ behavior: "smooth", block: "end" });
   try {
-    const data = await api(`/api/works/${current.work.id}/ask`, { method: "POST", json: { question } });
+    const data = await api(`/api/works/${current.work.id}/ask`, {
+      method: "POST",
+      json: { question, audience: state.profile.audience, lang: state.profile.lang },
+    });
     current.questions.push({ question: data.question, result: data.result });
     if (pending.isConnected) pending.outerHTML = questionHtml({ question: data.question, result: data.result });
     if (state.current === current) input.value = "";
@@ -780,6 +969,8 @@ async function init() {
     badge.className = "mode-badge live";
     badge.title = state.health.model || "";
   }
+  state.profile = loadProfile();
+  renderProfileControls();
   $("#bib-section").hidden = !state.health.bib_enabled;
   $("#sidebar-note").textContent =
     `자료는 이 브라우저의 자료실에만 연결되며, 마지막 이용 후 ${state.health.retention_days}일이 지나면 자동 삭제됩니다.`;
@@ -801,6 +992,25 @@ async function init() {
   $("#refresh-analysis").addEventListener("click", () => runAnalysis(true));
   $("#translate-target").addEventListener("change", renderAnalysis);
   $("#translate-part").addEventListener("change", renderAnalysis);
+  $("#audience").addEventListener("change", onProfileChange);
+  $("#explain-lang").addEventListener("change", onProfileChange);
+  $("#glossary-add").addEventListener("click", () => {
+    $("#glossary-panel").dataset.dirty = "1";
+    $(".g-term", addGlossaryRow()).focus();
+  });
+  $("#glossary-save").addEventListener("click", () => saveGlossary());
+  $("#glossary-extract").addEventListener("click", extractGlossary);
+  $("#glossary-rows").addEventListener("input", (event) => {
+    $("#glossary-panel").dataset.dirty = "1";
+    const row = event.target.closest(".glossary-row");
+    if (row) { row.dataset.source = "user"; row.classList.remove("auto"); }
+  });
+  $("#glossary-rows").addEventListener("click", (event) => {
+    const del = event.target.closest(".g-del");
+    if (!del) return;
+    $("#glossary-panel").dataset.dirty = "1";
+    del.closest(".glossary-row").remove();
+  });
   $("#qa-form").addEventListener("submit", submitQuestion);
   $("#qa-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#qa-form").requestSubmit();

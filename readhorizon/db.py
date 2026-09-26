@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS masking_log (
     count INTEGER NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS glossaries (
+    work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    target TEXT NOT NULL,
+    entries_json TEXT NOT NULL,
+    version TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (work_id, target)
+);
 CREATE TABLE IF NOT EXISTS reference_docs (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -234,6 +242,27 @@ class Store:
                 "INSERT INTO analyses (id, work_id, kind, option, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (uuid.uuid4().hex, work_id, kind, option, json.dumps(result, ensure_ascii=False), now_iso()),
             )
+
+    def get_glossary(self, work_id: str, target: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT entries_json, version, updated_at FROM glossaries WHERE work_id = ? AND target = ?", (work_id, target)
+            ).fetchone()
+        if row is None:
+            return None
+        return {"entries": _loads(row["entries_json"]), "version": row["version"], "updated_at": row["updated_at"]}
+
+    def save_glossary(self, work_id: str, target: str, entries: list[dict]) -> dict:
+        """용어집을 통째로 바꾼다. version은 저장할 때마다 새 값(번역 결과가 어느 용어집으로 만들어졌는지 구분)."""
+        version, updated = uuid.uuid4().hex[:12], now_iso()
+        with self.tx() as conn:
+            conn.execute(
+                """INSERT INTO glossaries (work_id, target, entries_json, version, updated_at) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(work_id, target) DO UPDATE SET
+                   entries_json = excluded.entries_json, version = excluded.version, updated_at = excluded.updated_at""",
+                (work_id, target, json.dumps(entries, ensure_ascii=False), version, updated),
+            )
+        return {"entries": entries, "version": version, "updated_at": updated}
 
     def save_question(self, workspace_id: str, work_id: str, question: str, result: dict, mask_counts: dict[str, int]) -> str:
         qid = uuid.uuid4().hex
