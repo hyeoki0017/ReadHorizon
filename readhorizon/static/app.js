@@ -15,6 +15,7 @@ const state = {
   citeRegistry: new Map(),
   citeSeq: 0,
   bibSelected: null,
+  ocr: null, // 마지막 텍스트 추출 결과(확인 전에는 저장하지 않음)
 };
 
 /* ── 자료실 ID: 브라우저가 만든 무작위 값(계정 정보 없음) ── */
@@ -241,7 +242,8 @@ async function refreshWorks() {
     button.type = "button";
     button.dataset.id = w.id;
     if (state.current && state.current.work.id === w.id) button.classList.add("active");
-    const source = w.source_kind === "intro_only" ? "소개글만" : `${w.paragraph_count}개 단락`;
+    const source = w.source_kind === "intro_only" ? "소개글만"
+      : `${w.source_kind === "ocr" ? "이미지 추출 · " : ""}${w.paragraph_count}개 단락`;
     button.innerHTML = `<span class="w-title">${escapeHtml(w.title)}</span><span class="w-meta">${escapeHtml(genreLabel(w.category, w.genre))} · ${source}</span>`;
     button.addEventListener("click", () => openWork(w.id).catch((error) => toast(error.message)));
     li.appendChild(button);
@@ -267,6 +269,7 @@ function renderWork() {
   $("#work-title").textContent = work.title;
   const parts = [work.author, genreLabel(work.category, work.genre)];
   if (work.source_filename) parts.push(work.source_filename);
+  if (work.source_kind === "ocr") parts.push("이미지에서 추출(확인 후 등록)");
   parts.push(`등록 ${formatDate(work.created_at)}`);
   $("#work-meta").textContent = parts.filter(Boolean).join(" · ");
 
@@ -464,6 +467,127 @@ function setSource(kind) {
   $$("[data-source]").forEach((b) => b.classList.toggle("active", b.dataset.source === kind));
   $("#source-file").hidden = kind !== "file";
   $("#source-paste").hidden = kind !== "paste";
+  $("#source-ocr").hidden = kind !== "ocr";
+}
+
+function currentSource() {
+  return $("[data-source].active")?.dataset.source || "file";
+}
+
+/* ── 이미지·스캔본 텍스트 추출(OCR) ──
+   사진은 브라우저에서 긴 변 2576px·약 375만 화소 이하로 줄이고 JPEG로 다시 그려 보낸다.
+   다시 그리는 과정에서 위치 정보(EXIF) 같은 메타데이터가 빠진다(서버에서도 한 번 더 지운다). */
+const OCR_MAX_EDGE = 2576;
+const OCR_MAX_PIXELS = 3750000;
+
+async function decodeImage(file) {
+  try {
+    return await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch (error) {
+    if (error instanceof TypeError) return createImageBitmap(file);
+    throw error;
+  }
+}
+
+async function downscaleImage(file) {
+  const bitmap = await decodeImage(file);
+  const scale = Math.min(
+    1,
+    OCR_MAX_EDGE / Math.max(bitmap.width, bitmap.height),
+    Math.sqrt(OCR_MAX_PIXELS / (bitmap.width * bitmap.height)),
+  );
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("이미지를 변환하지 못했습니다."))), "image/jpeg", 0.92);
+  });
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "page"}.jpg`, { type: "image/jpeg" });
+}
+
+function isPdf(file) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+function resetOcr() {
+  state.ocr = null;
+  $("#ocr-status").textContent = "";
+  $("#ocr-result").hidden = true;
+  $("#ocr-text").value = "";
+  $("#ocr-confirm").checked = false;
+  $("#ocr-summary").innerHTML = "";
+  $("#ocr-uncertain").innerHTML = "";
+}
+
+function showOcrResult(result) {
+  state.ocr = result;
+  const status = $("#ocr-status");
+  if (!result.has_text) {
+    status.textContent = "글자를 찾지 못했습니다. 더 밝고 선명하게 찍은 이미지로 다시 시도해 주세요.";
+    $("#ocr-result").hidden = true;
+    return;
+  }
+  const chips = [`<span class="chip chip-work">${result.pages}쪽</span>`];
+  chips.push(
+    result.uncertain_count
+      ? `<span class="chip chip-warn">불확실 ${result.uncertain_count}곳</span>`
+      : '<span class="chip chip-ok">불확실 표시 없음</span>',
+  );
+  const maskedTotal = Object.values(result.masked || {}).reduce((a, b) => a + b, 0);
+  if (maskedTotal) chips.push(`<span class="chip chip-intro">개인정보 ${maskedTotal}건 가림</span>`);
+  if (result.mode === "demo") chips.push('<span class="chip chip-warn">데모 응답</span>');
+  const notes = [result.layout, ...(result.notes || [])].filter(Boolean).map(escapeHtml);
+  $("#ocr-summary").innerHTML = chips.join("") + notes.map((n) => `<span class="note">${n}</span>`).join("");
+  $("#ocr-uncertain").innerHTML = (result.uncertain_snippets || [])
+    .map((snippet) => `<li><code>${escapeHtml(snippet)}</code></li>`)
+    .join("");
+  $("#ocr-text").value = result.text;
+  $("#ocr-confirm").checked = false;
+  $("#ocr-result").hidden = false;
+  status.textContent = result.uncertain_count
+    ? "[?] 표시가 있는 곳을 원본과 대조해 고친 뒤 확인란을 체크하고 등록해 주세요."
+    : "추출한 텍스트를 원본과 대조해 확인한 뒤 등록해 주세요.";
+}
+
+async function runOcr() {
+  const files = Array.from($("#ocr-input").files);
+  const status = $("#ocr-status");
+  if (!files.length) {
+    status.textContent = "이미지나 스캔 PDF를 먼저 선택해 주세요.";
+    return;
+  }
+  const button = $("#ocr-run");
+  button.disabled = true;
+  status.textContent = "이미지를 준비하는 중…";
+  try {
+    const data = new FormData();
+    for (const file of files) {
+      let upload = file;
+      if (!isPdf(file)) {
+        try {
+          upload = await downscaleImage(file);
+        } catch (_) {
+          upload = file; // 브라우저가 못 여는 형식은 서버가 안내 메시지를 돌려준다
+        }
+      }
+      data.append("files", upload, upload.name);
+    }
+    data.set("scope", $("#ocr-scope").value);
+    data.set("genre", $("#genre-select").value);
+    status.textContent = "텍스트를 추출하는 중… 쪽수가 많으면 1~2분 걸릴 수 있어요.";
+    showOcrResult(await api("/api/ocr", { method: "POST", body: data }));
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function openNewWork() {
@@ -472,6 +596,7 @@ function openNewWork() {
   state.bibSelected = null;
   $("#bib-results").innerHTML = "";
   $("#bib-selected").hidden = true;
+  resetOcr();
   renderCategoryOptions();
   setSource("file");
   $("#new-work-dialog").showModal();
@@ -515,7 +640,7 @@ async function submitWork(event) {
   event.preventDefault();
   const form = $("#new-work-form");
   const data = new FormData();
-  const usingFile = !$("#source-file").hidden;
+  const source = currentSource();
   data.set("category", form.elements.category.value);
   data.set("genre", form.elements.genre.value);
   data.set("title", form.elements.title.value);
@@ -524,8 +649,18 @@ async function submitWork(event) {
   data.set("intro_source_url", form.elements.intro_source_url.value);
   if (state.bibSelected) data.set("bib_json", JSON.stringify(state.bibSelected));
   const file = $("#file-input").files[0];
-  if (usingFile && file) data.set("file", file);
-  if (!usingFile) data.set("text", form.elements.text.value);
+  if (source === "file" && file) data.set("file", file);
+  if (source === "paste") data.set("text", form.elements.text.value);
+  if (source === "ocr") {
+    const text = $("#ocr-text").value.trim();
+    if (text && !$("#ocr-confirm").checked) {
+      toast("추출한 텍스트를 원본과 대조해 확인한 뒤 확인란을 체크해 주세요.");
+      $("#ocr-confirm").focus();
+      return;
+    }
+    data.set("text", text);
+    data.set("origin", "ocr");
+  }
 
   const button = $("#submit-work");
   button.disabled = true;
@@ -615,6 +750,8 @@ async function init() {
   $("#new-work-btn").addEventListener("click", openNewWork);
   $("#new-work-form").addEventListener("submit", submitWork);
   $("#bib-search-btn").addEventListener("click", searchBib);
+  $("#ocr-run").addEventListener("click", runOcr);
+  $("#ocr-input").addEventListener("change", () => { if (state.ocr) resetOcr(); });
   $("#bib-query").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); searchBib(); } });
   $$("[data-source]").forEach((b) => b.addEventListener("click", () => setSource(b.dataset.source)));
   $$("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));

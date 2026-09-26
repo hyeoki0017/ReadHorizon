@@ -56,6 +56,10 @@ class Settings:
     create_per_minute: int = 30
     # 접속 로그(IP 포함)는 기본으로 남기지 않는다(개인정보 최소 수집)
     access_log: bool = False
+    # 이미지·스캔 PDF 텍스트 추출(OCR): 한 번에 올릴 이미지 수, 스캔 PDF 쪽수, 추출에 쓸 effort
+    ocr_max_images: int = 10
+    ocr_max_pages: int = 20
+    ocr_effort: str = "medium"
 
     @property
     def bib_enabled(self) -> bool:
@@ -74,6 +78,9 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
     effort = os.getenv("RH_EFFORT", "high").strip().lower()
     if effort not in VALID_EFFORTS:
         effort = "high"
+    ocr_effort = os.getenv("RH_OCR_EFFORT", "medium").strip().lower()
+    if ocr_effort not in VALID_EFFORTS:
+        ocr_effort = "medium"
 
     return Settings(
         db_path=Path(os.getenv("RH_DB_PATH", "data/readhorizon.db")),
@@ -88,4 +95,7 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
         llm_daily=max(0, _int_env("RH_LLM_DAILY_LIMIT", 1000)),
         create_per_minute=max(0, _int_env("RH_CREATE_PER_MINUTE", 30)),
         access_log=_bool_env("RH_ACCESS_LOG", False),
+        ocr_max_images=min(20, max(1, _int_env("RH_OCR_MAX_IMAGES", 10))),
+        ocr_max_pages=min(100, max(1, _int_env("RH_OCR_MAX_PAGES", 20))),
+        ocr_effort=ocr_effort,
     )

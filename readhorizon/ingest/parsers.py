@@ -2,7 +2,7 @@
 
 지원: .txt .md .pdf .docx .hwpx
 - 제목(헤딩)은 마크다운 형식('# 제목')으로 바꿔 두어, 정규화 단계에서 섹션으로 인식한다.
-- .hwp(한글 5.0 바이너리)와 스캔 PDF(텍스트 없음)는 아직 지원하지 않으며, 대안을 안내한다.
+- .hwp(한글 5.0 바이너리)는 아직 지원하지 않는다. 스캔 PDF(텍스트 없음)는 OCR(readhorizon.ocr)로 안내한다.
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def _parse_pdf(data: bytes) -> str:
     if not text.strip():
         raise ParseError(
             "PDF에서 텍스트를 찾지 못했습니다. 스캔본(이미지) PDF로 보입니다. "
-            "이미지 인식(OCR)은 다음 단계에서 지원할 예정입니다."
+            "원문 입력의 '이미지·스캔본' 탭에서 텍스트 추출을 이용해 주세요."
         )
     return text
 

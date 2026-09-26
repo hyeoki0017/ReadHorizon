@@ -45,6 +45,26 @@ def _stream_events(stop_reason: str = "end_turn") -> list[dict]:
     ]
 
 
+def _ocr_events() -> list[dict]:
+    payload = json.dumps(
+        {"has_text": True, "text": "죽는 날까지 하늘을 우러[?]", "layout": "가로쓰기 1단", "uncertain_notes": ["끝 글자 흐림"]},
+        ensure_ascii=False,
+    )
+    message = {
+        "id": "msg_ocr", "type": "message", "role": "assistant", "model": "claude-opus-5", "content": [],
+        "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 900, "output_tokens": 1},
+    }
+    return [
+        {"type": "message_start", "message": message},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": payload[:20]}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": payload[20:]}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 40}},
+        {"type": "message_stop"},
+    ]
+
+
 class FakeAnthropic(BaseHTTPRequestHandler):
     requests: list[dict] = []
     mode = "ok"
@@ -63,7 +83,10 @@ class FakeAnthropic(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
             return
-        data = _sse(_stream_events("refusal" if FakeAnthropic.mode == "refusal" else "end_turn"))
+        if FakeAnthropic.mode == "ocr":
+            data = _sse(_ocr_events())
+        else:
+            data = _sse(_stream_events("refusal" if FakeAnthropic.mode == "refusal" else "end_turn"))
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Content-Length", str(len(data)))
@@ -122,3 +145,20 @@ def test_sdk_auth_error_is_translated(fake_server, seosi_text):
     FakeAnthropic.mode = "auth"
     with pytest.raises(LLMError, match="인증"):
         _engine(fake_server).ask(_ctx(seosi_text), "질문")
+
+
+def test_sdk_ocr_round_trip_with_structured_output(fake_server):
+    from readhorizon.ocr import OCRInputs, run_ocr
+
+    FakeAnthropic.mode = "ocr"
+    sdk = anthropic.Anthropic(api_key="test-key", base_url=fake_server, max_retries=0)
+    llm = ClaudeClient("claude-opus-5", "high", client=sdk, ocr_effort="medium")
+    result = run_ocr(llm, OCRInputs([b"\xff\xd8fakejpeg"], None, 1), scope="passage", verse_hint=True)
+
+    body = FakeAnthropic.requests[0]["body"]
+    assert body["output_config"]["format"]["type"] == "json_schema"
+    assert body["output_config"]["effort"] == "medium" and body["stream"] is True
+    image = body["messages"][0]["content"][1]
+    assert image["type"] == "image" and image["source"]["media_type"] == "image/jpeg"
+    assert result["text"] == "죽는 날까지 하늘을 우러[?]" and result["uncertain_count"] == 1
+    assert result["layout"] == "가로쓰기 1단" and result["mode"] == "live"

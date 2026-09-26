@@ -1,0 +1,10 @@
+[
+  {
+    "id": "sample-서시-가로쓰기",
+    "files": ["서시.png"],
+    "truth": "../works/서시_윤동주.txt",
+    "scope": "passage",
+    "verse": true,
+    "note": "ReadHorizon이 만든 합성 이미지(저작권 만료 작품). 제목 줄은 scope=passage로 제외되는지 함께 확인"
+  }
+]

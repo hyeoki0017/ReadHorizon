@@ -4,6 +4,7 @@
   python -m readhorizon import-references samples/references.sample.json
   python -m readhorizon purge
   python -m readhorizon eval samples/eval_items.sample.json
+  python -m readhorizon eval-ocr samples/ocr/manifest.sample.json
 """
 
 from __future__ import annotations
@@ -31,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
 
     ev = sub.add_parser("eval", help="선다형 문항 정답률 벤치마크")
     ev.add_argument("path", type=Path)
+
+    ev_ocr = sub.add_parser("eval-ocr", help="이미지 글자 추출(OCR) 정확도(CER) 평가")
+    ev_ocr.add_argument("path", type=Path)
 
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -84,6 +88,27 @@ def main(argv: list[str] | None = None) -> int:
         try:
             report = run_benchmark(engine, load_items(args.path))
         except BenchmarkError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "eval-ocr":
+        from .analysis.llm import ClaudeClient, DemoClient
+        from .ocr_eval import OCRBenchmarkError, load_manifest, run_ocr_benchmark
+
+        llm = (
+            ClaudeClient(settings.model, settings.effort, ocr_effort=settings.ocr_effort)
+            if settings.llm_mode == "live"
+            else DemoClient()
+        )
+        if llm.mode == "demo":
+            print("주의: 데모 모드입니다. 실제 정확도를 재려면 ANTHROPIC_API_KEY를 설정하세요.", file=sys.stderr)
+        try:
+            report = run_ocr_benchmark(
+                llm, load_manifest(args.path), args.path.parent, settings.ocr_max_images, settings.ocr_max_pages
+            )
+        except OCRBenchmarkError as exc:
             print(f"오류: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(report, ensure_ascii=False, indent=2))

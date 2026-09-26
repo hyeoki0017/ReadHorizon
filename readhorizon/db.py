@@ -261,6 +261,17 @@ class Store:
         ]
 
     # ── 개인정보: 마스킹 집계, 보관 기간 ─────────────────
+    def log_masking(self, workspace_id: str, counts: dict[str, int]) -> None:
+        """작품과 연결되지 않은 단계(OCR 등)에서 가린 항목의 개수만 기록한다."""
+        rows = [(workspace_id, code, n, now_iso()) for code, n in counts.items() if n]
+        if not rows:
+            return
+        with self.tx() as conn:
+            conn.executemany(
+                "INSERT INTO masking_log (workspace_id, work_id, category, count, created_at) VALUES (?, NULL, ?, ?, ?)",
+                rows,
+            )
+
     def masking_summary(self, workspace_id: str, days: int = 30) -> dict[str, int]:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
         with self._lock:

@@ -24,6 +24,7 @@ from .config import Settings, load_settings
 from .db import Store
 from .ingest.normalize import clean_line, clean_text, looks_like_verse, normalize_text
 from .ingest.parsers import ParseError, parse_upload
+from .ocr import OCRInputError, prepare_inputs, run_ocr
 from .privacy.masking import mask, merge_counts
 from .privacy.notice import build_notice
 from .ratelimit import RateLimiter
@@ -35,7 +36,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 MAX_INTRO_CHARS = 5000
 MAX_TEXT_CHARS = 2_000_000
 FORM_OVERHEAD_BYTES = 1024 * 1024  # 파일 외 입력값·멀티파트 경계용 여유
-FORM_FIELDS = ("category", "genre", "title", "author", "text", "intro_text", "intro_source_url", "bib_json")
+FORM_FIELDS = (
+    "category", "genre", "title", "author", "text", "intro_text", "intro_source_url", "bib_json", "origin",
+)
+VERSE_GENRES = {"poem", "csat_literature"}
 BIB_KEYS = ("title", "author", "publisher", "isbn", "kdc", "pages", "publish_date")
 CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
@@ -125,7 +129,11 @@ def create_app(
     settings = settings or load_settings()
     store = store or Store(settings.db_path)
     if llm is None:
-        llm = ClaudeClient(settings.model, settings.effort) if settings.llm_mode == "live" else DemoClient()
+        llm = (
+            ClaudeClient(settings.model, settings.effort, ocr_effort=settings.ocr_effort)
+            if settings.llm_mode == "live"
+            else DemoClient()
+        )
     if bib_client is None and settings.nl_cert_key:
         bib_client = NationalLibraryClient(settings.nl_cert_key)
     engine = AnalysisEngine(llm, ReferenceIndex(store), settings.fulltext_char_limit)
@@ -148,6 +156,7 @@ def create_app(
         return response
 
     @app.exception_handler(ParseError)
+    @app.exception_handler(OCRInputError)
     @app.exception_handler(AnalysisRequestError)
     @app.exception_handler(LLMRefusal)
     async def unprocessable(_: Request, exc: Exception):
@@ -256,6 +265,13 @@ def create_app(
         if not paragraphs and not masked_intro.text:
             raise HTTPException(status_code=422, detail="원문 파일, 원문 붙여넣기, 책 소개 중 하나는 입력해 주세요.")
 
+        if source_filename:
+            source_kind = "upload"
+        elif paragraphs:
+            source_kind = "ocr" if fields["origin"] == "ocr" else "paste"  # 이미지에서 추출해 사용자가 확인한 원문
+        else:
+            source_kind = "intro_only"
+
         bib = _clean_bib(fields["bib_json"])
         final_title = (
             masked_title.text
@@ -271,7 +287,7 @@ def create_app(
             category=fields["category"],
             genre=fields["genre"],
             verse=verse,
-            source_kind="upload" if source_filename else ("paste" if paragraphs else "intro_only"),
+            source_kind=source_kind,
             source_filename=source_filename,
             intro_text=masked_intro.text or None,
             intro_source_url=url or None,
@@ -359,6 +375,33 @@ def create_app(
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=404, detail="답변 중에 작품이 삭제되었습니다.") from None
         return {"id": qid, "question": masked.text, "result": result}
+
+    # ── 이미지·스캔 PDF 텍스트 추출(OCR) ─────────────────
+    @app.post("/api/ocr")
+    async def ocr(request: Request, ws: str = Depends(workspace_id)) -> dict:
+        """이미지·스캔 PDF에서 글자를 추출해 돌려준다. 아무것도 저장하지 않는다(가린 항목 개수만 기록)."""
+        enforce(create_limiter, request)  # 이미지 해석(CPU)도 IP별로 제한한다. LLM 호출 제한은 아래에서 따로 적용
+        try:
+            form = await request.form(max_files=50, max_fields=10, max_part_size=64 * 1024)
+        except StarletteHTTPException:
+            raise HTTPException(status_code=400, detail="요청 형식이 올바르지 않습니다.") from None
+        try:
+            files: list[tuple[str, bytes]] = []
+            for item in form.getlist("files"):
+                if isinstance(item, StarletteUploadFile) and item.filename:
+                    data = await item.read(upload_limit + 1)
+                    if len(data) > upload_limit:
+                        raise HTTPException(status_code=413, detail=f"파일이 너무 큽니다(최대 {settings.max_upload_mb}MB).")
+                    files.append((item.filename, data))
+            scope = form.get("scope") if isinstance(form.get("scope"), str) else "all"
+            genre = form.get("genre") if isinstance(form.get("genre"), str) else ""
+        finally:
+            await form.close()
+        inputs = await run_in_threadpool(prepare_inputs, files, settings.ocr_max_images, settings.ocr_max_pages)
+        enforce(llm_limiter, request)
+        result = await run_in_threadpool(run_ocr, llm, inputs, scope, genre in VERSE_GENRES)
+        await run_in_threadpool(store.log_masking, ws, result["masked"])
+        return result
 
     # ── 웹 화면 ───────────────────────────────────────────
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -150,6 +150,7 @@
         <div class="segmented" role="tablist">
           <button type="button" class="seg active" data-source="file">파일 업로드</button>
           <button type="button" class="seg" data-source="paste">붙여넣기</button>
+          <button type="button" class="seg" data-source="ocr">이미지·스캔본</button>
         </div>
         <div id="source-file" class="source-panel">
           <input id="file-input" name="file" type="file" accept=".txt,.md,.pdf,.docx,.hwpx">
@@ -157,6 +158,31 @@
         </div>
         <div id="source-paste" class="source-panel" hidden>
           <textarea name="text" rows="8" placeholder="작품 원문을 붙여넣으세요. 시는 행과 연(빈 줄)을 그대로 두세요."></textarea>
+        </div>
+        <div id="source-ocr" class="source-panel" hidden>
+          <input id="ocr-input" type="file" multiple
+            accept="image/jpeg,image/png,image/webp,image/gif,image/heic,application/pdf,.pdf">
+          <p class="hint">
+            교재·시험지 사진이나 캡처는 한 번에 10장까지, 스캔 PDF는 20쪽까지 올릴 수 있어요.
+            사진은 이 브라우저에서 줄이면서 위치 정보(EXIF)를 지운 뒤 보냅니다. 이름·학번이 보이면 가리고 올려 주세요.
+          </p>
+          <div class="inline">
+            <select id="ocr-scope" aria-label="추출 범위">
+              <option value="all">보이는 글 전체</option>
+              <option value="passage">지문만 (문항·선지 제외)</option>
+            </select>
+            <button id="ocr-run" type="button" class="btn">텍스트 추출</button>
+          </div>
+          <p id="ocr-status" class="hint" role="status" aria-live="polite"></p>
+          <div id="ocr-result" hidden>
+            <div id="ocr-summary" class="ocr-summary"></div>
+            <textarea id="ocr-text" rows="10" aria-label="추출한 텍스트(직접 고칠 수 있음)"></textarea>
+            <ul id="ocr-uncertain" class="ocr-uncertain"></ul>
+            <label class="check">
+              <input id="ocr-confirm" type="checkbox">
+              추출한 텍스트를 원본과 대조해 확인했습니다
+            </label>
+          </div>
         </div>
       </fieldset>
 
