@@ -6,6 +6,7 @@
 | 작성일 | 2026-09-26 |
 | 용도 | 외부 제출·설득용 (지원사업·투자·협력 검토) |
 | 기준 코드 | 브랜치 `claude/literary-analysis-program-design-0pfrrk`, 커밋 `6187f08` (웹 MVP + 이미지 텍스트 추출) |
+| 형식 | 원본 `docs/PRD.md` · Word 판 `docs/PRD.docx` (원본에서 생성) |
 | 관련 문서 | [설계 결정 기록](design.md) · [README](../README.md) |
 
 **상태 표기**
@@ -152,20 +153,22 @@
 ```mermaid
 flowchart TB
     subgraph Engine["공통 분석 엔진 (✅ 구현)"]
+        direction TB
         IN["입력 정규화<br/>섹션 > 문단 · 연 > 행"]
         CITE["근거 인용 + 자동 검증"]
         TRUST["근거율 · 신뢰도 배지"]
         TR["번역·풀이"]
     end
-    subgraph Modes["모드 = 설정 묶음 (🔜)"]
+    subgraph Modes["모드 = 설정 묶음 (🔜 계획)"]
+        direction TB
         S["학생"]
         T["교사·강사"]
         G["일반"]
         R["대학생·연구"]
     end
-    P["개인 설정<br/>설명 언어 · 어휘 수준 · 글자 크기"] --> Modes
+    P["개인 설정<br/>설명 언어 · 어휘 수준<br/>글자 크기"] --> Modes
     Engine --> Modes
-    Modes --> OUT["결과 보기 · 내보내기 · 전자책"]
+    Modes --> OUT["결과 보기<br/>내보내기 · 전자책"]
 ```
 
 - **모드 전환**: 같은 작품을 다른 모드로 다시 볼 수 있습니다. 예를 들어 교사가 학생 모드로 미리 보고, 연구 모드 사용자가 일반 모드의 쉬운 요약을 볼 수 있습니다. 분석 결과는 작품에 쌓여 모드를 바꿔도 사라지지 않습니다.
