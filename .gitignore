@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# 로컬 설정·데이터 (원문·분석 결과가 들어 있으므로 커밋 금지)
+.env
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 기타
+.DS_Store
+screenshots/

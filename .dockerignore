@@ -1,0 +1,17 @@
+# 이미지에 필요 없는 파일과 비밀 값(.env)이 빌드 컨텍스트로 넘어가지 않게 한다
+.git
+.github
+.venv
+venv*
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.env
+data
+*.db
+*.db-*
+tests
+docs
+samples
+screenshots
