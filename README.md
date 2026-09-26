@@ -55,10 +55,48 @@ python -m readhorizon serve   # http://127.0.0.1:8000
 | `RH_RETENTION_DAYS` | `180` | 마지막 이용 후 보관 일수 |
 | `RH_NL_CERT_KEY` | (없음) | 국립중앙도서관 서지 API 인증키. 없으면 서지 검색 숨김 |
 | `RH_DB_PATH` | `data/readhorizon.db` | SQLite 경로 (git에 올리지 않음) |
-| `RH_MAX_UPLOAD_MB` | `20` | 업로드 최대 크기 |
-| `RH_FULLTEXT_CHAR_LIMIT` | `200000` | 이보다 긴 작품은 관련 문단만 골라 분석(결과에 "발췌" 표시) |
+| `RH_MAX_UPLOAD_MB` | `20` | 파일·붙여넣기 원문의 최대 크기(요청 전체는 이보다 1MB 더 허용) |
+| `RH_FULLTEXT_CHAR_LIMIT` | `200000` | 이보다 긴 작품은 관련 문단만 골라 분석(결과에 "발췌" 표시). 최소 5000 |
+| `RH_LLM_PER_MINUTE` | `10` | 접속 IP별 분당 분석·질문 수(저장된 결과 조회는 제외). `0`이면 끔 |
+| `RH_LLM_DAILY_LIMIT` | `1000` | 서버 프로세스 전체의 하루(UTC) 분석·질문 수. API 비용 상한 역할. `0`이면 끔 |
+| `RH_CREATE_PER_MINUTE` | `30` | 접속 IP별 분당 작품 등록 수. `0`이면 끔 |
+| `RH_ACCESS_LOG` | `0` | `1`이면 접속 로그(IP 포함)를 남김. 기본은 남기지 않음(개인정보 최소 수집) |
 
 Claude API 호출에는 `fallbacks: "default"`(서버 측 대체 모델)가 켜져 있습니다. 안전 분류기가 요청을 거절하면 API가 권장 대체 모델로 다시 시도하며, 이때 결과에 "(대체 모델)"이 표시됩니다.
+
+## 배포
+
+### Docker
+
+```bash
+docker build -t readhorizon .
+docker run -d --name readhorizon -p 8000:8000 \
+  -v readhorizon-data:/data \
+  --env-file .env \
+  readhorizon
+```
+
+- root가 아닌 사용자(uid 10001)로 실행되며, SQLite 데이터는 `/data` 볼륨에 저장됩니다(`RH_DB_PATH=/data/readhorizon.db`).
+- 이미지에 헬스 체크(`/api/health`)가 들어 있습니다.
+- `.env`는 이미지에 포함되지 않습니다(`.dockerignore`). 키는 `--env-file`이나 배포 플랫폼의 비밀 값으로 넘기세요.
+- 참고자료 가져오기: `docker cp refs.json readhorizon:/tmp/ && docker exec readhorizon python -m readhorizon import-references /tmp/refs.json` (재시작 불필요)
+
+### 리버스 프록시(HTTPS) 뒤에서 운영할 때
+
+- **HTTPS**로만 공개하세요(nginx·Caddy·클라우드 로드밸런서 등).
+- 분석은 1~2분 걸릴 수 있습니다. 프록시 **응답 대기 시간을 300초 이상**으로 늘리세요(nginx 기본 60초에서는 504가 납니다). 예: `proxy_read_timeout 300s;`
+- 업로드 크기: 프록시의 본문 크기 제한을 `RH_MAX_UPLOAD_MB`보다 1MB 이상 크게 두세요. 예: `client_max_body_size 21m;`
+- 호출 제한이 실제 접속 IP로 동작하도록 프록시 주소를 `FORWARDED_ALLOW_IPS` 환경 변수로 지정하세요(uvicorn 설정). 예: `-e FORWARDED_ALLOW_IPS=10.0.0.5`
+- 서버는 프로세스 1개로 실행됩니다. 호출 제한은 프로세스 메모리에서 세므로, 서버를 여러 대로 늘릴 때는 프록시·게이트웨이에서도 제한을 두세요.
+
+### API로 작품을 등록할 때
+
+`POST /api/works`는 `multipart/form-data`로 보내세요(웹 화면의 FormData와 같은 방식).
+`application/x-www-form-urlencoded`는 한글이 약 3배로 부풀어 요청 크기 제한에 먼저 걸립니다.
+
+### CI
+
+`.github/workflows/ci.yml`이 Python 3.10–3.13 테스트·린트와 Docker 이미지 빌드·실행 확인을 합니다.
 
 ## 공용 참고자료 가져오기
 
@@ -73,7 +111,7 @@ python -m readhorizon import-references samples/references.sample.json
 ```
 
 - `work_title`이 있는 자료는 제목이 같은 작품에만 인용됩니다.
-- 서버가 실행 중일 때 가져온 자료는 서버를 다시 시작한 뒤 반영됩니다.
+- 서버가 실행 중일 때 가져온 자료도 다음 검색부터 바로 반영됩니다.
 
 ## 벤치마크 (정답률 · 근거율)
 
@@ -87,10 +125,12 @@ python -m readhorizon eval samples/eval_items.sample.json
 ## 테스트
 
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest -q
+ruff check readhorizon tests
 ```
 
-테스트는 파서, 정규화, 마스킹, 검색, 서지 파싱, 인용 검증, API, 자료실 분리, 보관 기간 삭제를 다룹니다.
+테스트는 파서, 정규화(NFC·긴 문단 분할), 마스킹, 검색, 서지 파싱, 인용 검증, API, 자료실 분리, 보관 기간 삭제, 요청 크기·호출 제한, XML 엔티티 공격 차단을 다룹니다.
 또 실제 Anthropic SDK로 로컬 가짜 서버와 통신해 요청 형식(Citations, 캐시, fallbacks)과 스트리밍 응답 파싱을 확인합니다.
 
 ## 구조
@@ -103,6 +143,7 @@ readhorizon/
   trust.py             출처 등급 · 신뢰도 배지
   evaluation.py        벤치마크
   cli.py               serve / import-references / purge / eval
+  ratelimit.py         접속 IP별·일일 호출 제한
   ingest/              파일 파싱(PDF·DOCX·HWPX·TXT·MD), 문단·행 정규화
   analysis/            프리셋, 프롬프트, Claude 호출, 인용 검증, 분석 엔진
   references/          공용 참고자료 가져오기 · BM25 검색(한글 2-gram, 옛한글 포함)
@@ -112,6 +153,8 @@ readhorizon/
 samples/               저작권 만료 작품, 참고자료·문항 형식 예시
 tests/
 docs/design.md         설계 결정 기록
+Dockerfile             실행 이미지 (non-root, /data 볼륨, 헬스 체크)
+.github/workflows/     CI (테스트·린트·Docker)
 ```
 
 ## 로드맵
@@ -127,4 +170,5 @@ docs/design.md         설계 결정 기록
 
 - 법률 검토: 사용자 업로드 원문 처리 범위, 소개글 붙여넣기, 14세 미만 이용자(법정대리인 동의) 정책
 - 자료실 ID는 브라우저에 저장된 무작위 값이라 인증이 아닙니다. 공개 서비스로 운영하려면 인증을 붙여야 합니다.
+- 공개 운영 시 `RH_LLM_DAILY_LIMIT`과 Anthropic 콘솔의 사용 한도를 함께 설정해 API 비용 상한을 두세요.
 - 국립중앙도서관 API 응답 필드 매핑은 실제 인증키로 처음 호출할 때 확인하세요.

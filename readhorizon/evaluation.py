@@ -41,6 +41,8 @@ def load_items(path: Path) -> list[dict]:
     if not isinstance(items, list) or not items:
         raise BenchmarkError("문항 파일은 비어 있지 않은 JSON 배열이어야 합니다.")
     for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise BenchmarkError(f"{i + 1}번째 문항은 JSON 객체여야 합니다.")
         missing = [k for k in ("id", "passage", "question", "choices", "answer") if k not in item]
         if missing:
             raise BenchmarkError(f"{i + 1}번째 문항에 {', '.join(missing)} 항목이 없습니다.")

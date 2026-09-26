@@ -92,6 +92,7 @@ function genreLabel(categoryId, genreId) {
    분석 결과는 [{text, citations}] 조각 목록. 근거가 검증된 조각은 밑줄 강조(mark)하고,
    조각 뒤에 인용 칩을 붙인다. 모든 텍스트는 escape 후 제한된 마크다운만 변환한다. */
 const M_OPEN = "\u0001", M_CLOSE = "\u0002", C_OPEN = "\u0003", C_CLOSE = "\u0004";
+const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 
 function isGrounding(c) {
   return c.verified && c.source !== "intro" && (c.tier === null || c.tier === "A" || c.tier === "B");
@@ -123,9 +124,11 @@ function renderSegments(segments) {
   let src = "";
   for (const seg of segments) {
     const grounded = (seg.citations || []).some(isGrounding);
+    // 표시용 제어 문자(\u0001~\u0004)와 겹치지 않도록 응답 속 제어 문자를 지운다
+    const text = String(seg.text || "").replace(CONTROL_RE, "");
     // 조각 끝의 줄바꿈 앞에 칩을 넣어 칩이 다음 줄로 넘어가지 않게 한다
-    const trail = (seg.text.match(/\n+$/) || [""])[0];
-    const body = trail ? seg.text.slice(0, -trail.length) : seg.text;
+    const trail = (text.match(/\n+$/) || [""])[0];
+    const body = trail ? text.slice(0, -trail.length) : text;
     src += body.split("\n").map((p) => (grounded && p.trim() ? M_OPEN + p + M_CLOSE : p)).join("\n");
     for (const c of seg.citations || []) {
       cites.push(c);
@@ -240,7 +243,7 @@ async function refreshWorks() {
     if (state.current && state.current.work.id === w.id) button.classList.add("active");
     const source = w.source_kind === "intro_only" ? "소개글만" : `${w.paragraph_count}개 단락`;
     button.innerHTML = `<span class="w-title">${escapeHtml(w.title)}</span><span class="w-meta">${escapeHtml(genreLabel(w.category, w.genre))} · ${source}</span>`;
-    button.addEventListener("click", () => openWork(w.id));
+    button.addEventListener("click", () => openWork(w.id).catch((error) => toast(error.message)));
     li.appendChild(button);
     list.appendChild(li);
   }
@@ -352,19 +355,24 @@ function renderAnalysis() {
 }
 
 async function runAnalysis(refresh) {
+  // 요청 중에 다른 작품·분석 종류로 바꿔도 결과가 원래 작품에 저장되도록 시작 시점의 값을 고정한다
+  const current = state.current;
+  const kind = state.kind;
   const { key, option } = analysisKey();
+  const stillShowing = () => state.current === current && analysisKey().key === key;
   const buttons = [$("#run-analysis"), $("#refresh-analysis")];
   buttons.forEach((b) => { b.disabled = true; });
   $("#analysis-body").innerHTML = '<p class="loading">분석 중입니다… 긴 작품은 1~2분 걸릴 수 있어요.</p>';
   try {
-    const result = await api(`/api/works/${state.current.work.id}/analyze`, {
+    const result = await api(`/api/works/${current.work.id}/analyze`, {
       method: "POST",
-      json: { kind: state.kind, option, refresh },
+      json: { kind, option, refresh },
     });
-    state.current.analyses.set(key, result);
-    renderAnalysis();
+    current.analyses.set(key, result);
+    if (stillShowing()) renderAnalysis();
   } catch (error) {
-    $("#analysis-body").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    if (stillShowing()) $("#analysis-body").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    else toast(error.message);
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
   }
@@ -388,22 +396,25 @@ async function submitQuestion(event) {
   const input = $("#qa-input");
   const question = input.value.trim();
   if (!question) return;
+  const current = state.current; // 답을 기다리는 동안 작품을 바꿔도 원래 작품에 기록한다
   const button = $("#qa-form button[type=submit]");
   button.disabled = true;
   const list = $("#qa-list");
-  if (!state.current.questions.length) list.innerHTML = "";
+  if (!current.questions.length) list.innerHTML = "";
   const pending = document.createElement("div");
   pending.className = "qa-item";
   pending.innerHTML = `<div class="q">${escapeHtml(question)}</div><p class="loading">답변을 만드는 중입니다…</p>`;
   list.appendChild(pending);
   pending.scrollIntoView({ behavior: "smooth", block: "end" });
   try {
-    const data = await api(`/api/works/${state.current.work.id}/ask`, { method: "POST", json: { question } });
-    state.current.questions.push({ question: data.question, result: data.result });
-    pending.outerHTML = questionHtml({ question: data.question, result: data.result });
-    input.value = "";
+    const data = await api(`/api/works/${current.work.id}/ask`, { method: "POST", json: { question } });
+    current.questions.push({ question: data.question, result: data.result });
+    if (pending.isConnected) pending.outerHTML = questionHtml({ question: data.question, result: data.result });
+    if (state.current === current) input.value = "";
   } catch (error) {
-    pending.querySelector(".loading").outerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    const loading = pending.querySelector(".loading");
+    if (pending.isConnected && loading) loading.outerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+    else toast(error.message);
   } finally {
     button.disabled = false;
   }
@@ -636,7 +647,11 @@ async function init() {
     }
   });
 
-  await refreshWorks();
+  try {
+    await refreshWorks();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);

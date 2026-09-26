@@ -33,6 +33,7 @@ def build_notice(masking_counts: dict[str, int], retention_days: int, bib_enable
             {"item": "책 소개 텍스트·출처 URL (선택)", "purpose": "읽기 가이드·작품 식별 보조", "retention": f"마지막 이용 후 {retention_days}일"},
             {"item": "질문 내용·분석 결과", "purpose": "결과 다시 보기", "retention": f"마지막 이용 후 {retention_days}일"},
             {"item": "자료실 ID (브라우저가 만든 무작위 값)", "purpose": "내 자료 구분", "retention": "브라우저 저장소를 지우면 연결이 끊김"},
+            {"item": "접속 IP", "purpose": "과도한 요청 제한(비용·서비스 보호)", "retention": "메모리에서 최근 1분만 사용, 저장하지 않음"},
         ],
         "not_collected": ["이름", "이메일", "전화번호", "계정 정보", "위치 정보"],
         "masking_period_days": 30,

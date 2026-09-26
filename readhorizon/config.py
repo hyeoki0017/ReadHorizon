@@ -33,6 +33,13 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     db_path: Path
@@ -43,6 +50,12 @@ class Settings:
     nl_cert_key: str | None
     max_upload_mb: int
     fulltext_char_limit: int
+    # 호출 제한(0이면 끔): 분석·질문(LLM 호출) 접속 IP별 분당, 프로세스 전체 하루, 작품 등록 IP별 분당
+    llm_per_minute: int = 10
+    llm_daily: int = 1000
+    create_per_minute: int = 30
+    # 접속 로그(IP 포함)는 기본으로 남기지 않는다(개인정보 최소 수집)
+    access_log: bool = False
 
     @property
     def bib_enabled(self) -> bool:
@@ -70,5 +83,9 @@ def load_settings(env_file: Path | None = Path(".env")) -> Settings:
         retention_days=max(1, _int_env("RH_RETENTION_DAYS", 180)),
         nl_cert_key=os.getenv("RH_NL_CERT_KEY", "").strip() or None,
         max_upload_mb=max(1, _int_env("RH_MAX_UPLOAD_MB", 20)),
-        fulltext_char_limit=max(1000, _int_env("RH_FULLTEXT_CHAR_LIMIT", 200_000)),
+        fulltext_char_limit=max(5000, _int_env("RH_FULLTEXT_CHAR_LIMIT", 200_000)),
+        llm_per_minute=max(0, _int_env("RH_LLM_PER_MINUTE", 10)),
+        llm_daily=max(0, _int_env("RH_LLM_DAILY_LIMIT", 1000)),
+        create_per_minute=max(0, _int_env("RH_CREATE_PER_MINUTE", 30)),
+        access_log=_bool_env("RH_ACCESS_LOG", False),
     )

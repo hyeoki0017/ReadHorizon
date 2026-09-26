@@ -51,11 +51,12 @@ def select_paragraphs(paragraphs: list[Paragraph], limit: int, query: str | None
     if query:
         ranked = BM25([p.text for p in paragraphs]).top(query, len(paragraphs))
         for idx, _ in ranked:
-            for neighbor in (idx - 1, idx, idx + 1):
+            # 관련 문단을 먼저 넣고, 남는 한도 안에서 앞뒤 문단을 붙인다
+            for neighbor in (idx, idx - 1, idx + 1):
                 if 0 <= neighbor < len(paragraphs) and neighbor not in chosen:
                     size = len(paragraphs[neighbor].text)
                     if budget + size > limit:
-                        break
+                        continue
                     chosen.add(neighbor)
                     budget += size
             if budget >= limit:
@@ -69,6 +70,8 @@ def select_paragraphs(paragraphs: list[Paragraph], limit: int, query: str | None
                 break
             chosen.add(idx)
             budget += size
+    if not chosen:
+        chosen.add(0)  # 한 문단이 한도보다 길어도 빈 문서를 보내지 않는다(문단은 정규화 단계에서 2,000자 이하로 나뉨)
     return [paragraphs[i] for i in sorted(chosen)], True
 
 

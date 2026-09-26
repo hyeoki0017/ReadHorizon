@@ -8,16 +8,19 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections import Counter
 
-_HANGUL = "가-힣ᄀ-ᇿ㄰-㆏ꥠ-꥿ힰ-퟿"
+# 한글 음절, 자모, 호환 자모, 옛한글 확장 자모 A·B
+_HANGUL_RANGES = ((0xAC00, 0xD7A3), (0x1100, 0x11FF), (0x3130, 0x318F), (0xA960, 0xA97F), (0xD7B0, 0xD7FF))
+_HANGUL = "".join(f"{chr(start)}-{chr(end)}" for start, end in _HANGUL_RANGES)
 TOKEN_RE = re.compile(rf"[0-9a-z]+|[{_HANGUL}]+")
 LATIN_RE = re.compile(r"[0-9a-z]")
 
 
 def tokenize(text: str) -> list[str]:
     tokens: list[str] = []
-    for word in TOKEN_RE.findall(text.lower()):
+    for word in TOKEN_RE.findall(unicodedata.normalize("NFC", text).lower()):
         if LATIN_RE.match(word) or len(word) == 1:
             tokens.append(word)
         else:
@@ -40,7 +43,7 @@ class BM25:
     def scores(self, query: str) -> list[float]:
         terms = tokenize(query)
         results: list[float] = []
-        for counts, length in zip(self.doc_tokens, self.doc_len):
+        for counts, length in zip(self.doc_tokens, self.doc_len, strict=True):
             score = 0.0
             for term in terms:
                 tf = counts.get(term, 0)

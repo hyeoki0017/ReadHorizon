@@ -111,3 +111,64 @@ def test_reference_index_filters_other_works(store, tmp_path):
     hits = index.search("부끄럼 없는 삶 다짐 노래", "서시")
     assert hits and all(h.title == "서시 해설" for h in hits)
     assert index.search("부끄럼 없는", "「진달래꽃」")[0].title == "진달래꽃 해설"
+
+
+def test_tokenize_normalizes_nfd():
+    import unicodedata
+
+    assert tokenize(unicodedata.normalize("NFD", "진달래꽃")) == tokenize("진달래꽃")
+
+
+def test_reference_title_matching_ignores_normalization_form(store, tmp_path):
+    import unicodedata
+
+    path = tmp_path / "refs.json"
+    path.write_text(
+        json.dumps([{"title": "해설", "source": "예시", "tier": "B", "license": "CC0",
+                     "work_title": unicodedata.normalize("NFD", "진달래꽃"), "text": "이별의 정한을 노래한다."}],
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
+    import_references(store, path)
+    assert ReferenceIndex(store).search("진달래꽃 이별", "진달래꽃")
+
+
+def test_import_rejects_non_object_entries(store, tmp_path):
+    path = tmp_path / "refs.json"
+    path.write_text(json.dumps(["문자열 항목"]), encoding="utf-8")
+    with pytest.raises(ReferenceImportError, match="객체"):
+        import_references(store, path)
+
+
+def test_reference_index_sees_imports_from_other_store_instances(store, tmp_path):
+    """서버 실행 중 CLI(다른 연결)로 가져온 참고자료도 재시작 없이 검색된다."""
+    from readhorizon.db import Store
+
+    index = ReferenceIndex(store)
+    assert index.search("서시 부끄럼", "서시") == []
+
+    other = Store(store.path)
+    path = tmp_path / "refs.json"
+    path.write_text(
+        json.dumps([{"title": "서시 해설", "source": "예시", "tier": "B", "license": "CC0", "work_title": "서시",
+                     "text": "부끄럼 없는 삶에 대한 다짐."}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    import_references(other, path)
+    other.close()
+    assert [h.title for h in index.search("서시 부끄럼", "서시")] == ["서시 해설"]
+
+
+def test_linked_reference_found_even_when_other_works_rank_higher(store, tmp_path):
+    entries = [
+        {"title": f"다른 작품 해설 {i}", "source": "예시", "tier": "B", "license": "CC0", "work_title": f"작품{i}",
+         "text": "별 바람 하늘 노래 " * 5}
+        for i in range(20)
+    ]
+    entries.append({"title": "서시 해설", "source": "예시", "tier": "B", "license": "CC0", "work_title": "서시",
+                    "text": "별과 바람을 노래한다."})
+    path = tmp_path / "refs.json"
+    path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    import_references(store, path)
+    hits = ReferenceIndex(store).search("별 바람 하늘 노래", "서시")
+    assert [h.title for h in hits] == ["서시 해설"]

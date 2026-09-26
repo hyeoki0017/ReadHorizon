@@ -135,3 +135,72 @@ def test_looks_like_verse(seosi_text):
     assert looks_like_verse(seosi_text)
     prose = "이것은 한 줄이 매우 긴 산문 문단으로, 시처럼 짧게 끊기지 않고 길게 이어지는 문장입니다. " * 3
     assert not looks_like_verse("\n".join([prose, prose, prose]))
+
+
+def test_long_paragraphs_are_split_at_sentence_boundaries():
+    sentence = "가" * 150 + "다. "
+    text = sentence * 40  # 한 문단 약 6,000자
+    paragraphs = normalize_text(text, verse=False)
+    assert len(paragraphs) >= 3
+    assert all(len(p.text) <= 2000 for p in paragraphs)
+    assert all(p.text.endswith("다.") for p in paragraphs)
+    assert [p.label for p in paragraphs[:2]] == ["1문단", "2문단"]
+
+
+def test_unbroken_long_text_is_hard_split():
+    paragraphs = normalize_text("가" * 4500, verse=False)
+    assert [len(p.text) for p in paragraphs] == [2000, 2000, 500]
+
+
+def test_nfd_and_control_characters_are_normalized():
+    import unicodedata
+
+    text = unicodedata.normalize("NFD", "별을 노래하는\x00 마음으로\u200b")
+    paragraphs = normalize_text(text, verse=False)
+    assert paragraphs[0].text == "별을 노래하는 마음으로"
+
+
+def test_archaic_hangul_survives_normalization():
+    line = "ᄒᆞᆫ 잔 ᄆᆞᆨ걸리"
+    assert normalize_text(line, verse=True)[0].text == line
+
+
+def test_garbage_pdf_raises_parse_error():
+    with pytest.raises(ParseError, match="PDF"):
+        parse_upload("broken.pdf", b"%PDF-1.4\n" + b"\x00garbage" * 50)
+
+
+def test_zip_bomb_guard_for_docx(monkeypatch):
+    from readhorizon.ingest import parsers
+
+    document = docx.Document()
+    document.add_paragraph("본문" * 100)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    monkeypatch.setattr(parsers, "MAX_ZIP_UNPACKED_BYTES", 1000)
+    with pytest.raises(ParseError, match="너무 큽니다"):
+        parse_upload("a.docx", buffer.getvalue())
+
+
+def test_windows_path_filename_uses_basename():
+    parsed = parse_upload("C:\\Users\\학생\\자료\\서시.txt", "내용".encode())
+    assert parsed.title_hint == "서시"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # 엔티티 폭탄(billion laughs)
+        '<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;">]>'
+        '<hs:sec xmlns:hs="s"><p><t>&lol2;</t></p></hs:sec>',
+        # 외부 엔티티(XXE)
+        '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+        '<hs:sec xmlns:hs="s"><p><t>&xxe;</t></p></hs:sec>',
+    ],
+)
+def test_hwpx_rejects_dtd_entities(payload):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("Contents/section0.xml", payload)
+    with pytest.raises(ParseError, match="HWPX"):
+        parse_upload("attack.hwpx", buffer.getvalue())

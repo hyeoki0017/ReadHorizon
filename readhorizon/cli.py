@@ -40,7 +40,15 @@ def main(argv: list[str] | None = None) -> int:
 
         from .main import create_app
 
-        uvicorn.run(create_app(settings), host=args.host, port=args.port)
+        # 접속 로그(IP 포함)는 RH_ACCESS_LOG=1일 때만 남긴다.
+        # 리버스 프록시 뒤라면 FORWARDED_ALLOW_IPS 환경 변수로 프록시 주소를 지정한다(uvicorn 설정).
+        uvicorn.run(
+            create_app(settings),
+            host=args.host,
+            port=args.port,
+            access_log=settings.access_log,
+            proxy_headers=True,
+        )
         return 0
 
     from .db import Store

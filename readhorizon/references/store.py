@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..db import Store
+from ..ingest.normalize import clean_line, clean_text
 from ..trust import TIERS
 from .search import BM25
 
@@ -24,7 +25,7 @@ class ReferenceImportError(ValueError):
 
 
 def normalize_title(value: str | None) -> str:
-    return re.sub(r"[\s「」『』<>《》\"'“”‘’()\[\]]", "", value or "").lower()
+    return re.sub(r"[\s「」『』<>《》\"'“”‘’()\[\]]", "", clean_line(value)).lower()
 
 
 def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
@@ -42,26 +43,33 @@ def chunk_text(text: str, size: int = CHUNK_CHARS) -> list[str]:
     return chunks
 
 
-def validate_entry(entry: dict, position: int) -> dict:
+def _field(entry: dict, key: str) -> str:
+    value = entry.get(key)
+    return clean_line(str(value)) if value is not None else ""
+
+
+def validate_entry(entry: object, position: int) -> dict:
     where = f"{position + 1}번째 항목"
+    if not isinstance(entry, dict):
+        raise ReferenceImportError(f"{where}: 항목은 JSON 객체여야 합니다.")
     for key in ("title", "source", "tier", "license", "text"):
-        if not str(entry.get(key) or "").strip():
+        if not _field(entry, key):
             raise ReferenceImportError(f"{where}: '{key}'가 비어 있습니다. 출처·등급·라이선스는 필수입니다.")
-    tier = str(entry["tier"]).strip().upper()
+    tier = _field(entry, "tier").upper()
     if tier not in TIERS:
         raise ReferenceImportError(f"{where}: tier는 A, B, C 중 하나여야 합니다.")
-    url = (entry.get("url") or "").strip() or None
-    if url and not url.startswith(("https://", "http://")):
+    url = _field(entry, "url") or None
+    if url and not url.lower().startswith(("https://", "http://")):
         raise ReferenceImportError(f"{where}: url은 http(s) 주소여야 합니다.")
     return {
-        "title": entry["title"].strip(),
-        "author": (entry.get("author") or "").strip() or None,
-        "source": entry["source"].strip(),
+        "title": _field(entry, "title"),
+        "author": _field(entry, "author") or None,
+        "source": _field(entry, "source"),
         "url": url,
         "tier": tier,
-        "license": entry["license"].strip(),
-        "work_title": (entry.get("work_title") or "").strip() or None,
-        "text": entry["text"],
+        "license": _field(entry, "license"),
+        "work_title": _field(entry, "work_title") or None,
+        "text": clean_text(str(entry["text"])),
     }
 
 
@@ -100,29 +108,33 @@ class ReferenceHit:
 
 
 class ReferenceIndex:
-    """참고자료 BM25 색인. 참고자료가 바뀌면 다시 만든다."""
+    """참고자료 BM25 색인. 참고자료가 바뀌면 다시 만든다.
+
+    (지문, 조각 목록, 색인)을 한 튜플로 통째로 바꿔, 동시에 검색하는 스레드가 서로 다른 버전을 섞어 보지 않게 한다.
+    """
 
     def __init__(self, store: Store) -> None:
         self.store = store
-        self._version = -1
-        self._chunks: list[dict] = []
-        self._bm25: BM25 | None = None
+        self._snapshot: tuple[tuple | None, list[dict], BM25 | None] = (None, [], None)
 
-    def _refresh(self) -> None:
-        if self._version == self.store.reference_version and self._bm25 is not None:
-            return
-        self._chunks = self.store.all_reference_chunks()
-        self._bm25 = BM25([f"{c['title']} {c['work_title'] or ''} {c['text']}" for c in self._chunks])
-        self._version = self.store.reference_version
+    def _current(self) -> tuple[list[dict], BM25 | None]:
+        fingerprint = self.store.reference_fingerprint()
+        cached_fingerprint, chunks, bm25 = self._snapshot
+        if fingerprint != cached_fingerprint or bm25 is None:
+            chunks = self.store.all_reference_chunks()
+            bm25 = BM25([f"{c['title']} {c['work_title'] or ''} {c['text']}" for c in chunks])
+            self._snapshot = (fingerprint, chunks, bm25)
+        return chunks, bm25
 
     def search(self, query: str, work_title: str, k: int = 4) -> list[ReferenceHit]:
-        self._refresh()
-        if not self._chunks or self._bm25 is None:
+        chunks, bm25 = self._current()
+        if not chunks or bm25 is None:
             return []
         target = normalize_title(work_title)
         hits: list[ReferenceHit] = []
-        for i, score in self._bm25.top(query, k * 3):
-            chunk = self._chunks[i]
+        # 다른 작품 자료를 걸러 낸 뒤에도 k개를 채울 수 있도록 전체 순위를 본다
+        for i, score in bm25.top(query, len(chunks)):
+            chunk = chunks[i]
             linked = normalize_title(chunk["work_title"])
             if linked and linked != target:
                 continue  # 다른 작품에 대한 자료는 인용하지 않는다

@@ -136,6 +136,8 @@ class ClaudeClient:
             raise LLMError(f"Claude API 오류({exc.status_code})가 발생했습니다. 잠시 후 다시 시도해 주세요.") from exc
         except anthropic.APIConnectionError as exc:
             raise LLMError("Claude API에 연결할 수 없습니다. 네트워크를 확인해 주세요.") from exc
+        except anthropic.APIError as exc:
+            raise LLMError("Claude API 응답을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.") from exc
         return parse_message(message)
 
 

@@ -12,10 +12,16 @@ import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import PurePath
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element, ParseError as XMLParseError
+
+from defusedxml import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_fromstring
+
+from .normalize import clean_line
 
 SUPPORTED_EXTENSIONS = (".txt", ".md", ".pdf", ".docx", ".hwpx")
-MAX_HWPX_UNPACKED_BYTES = 64 * 1024 * 1024
+# DOCX·HWPX(zip 기반) 압축 해제 크기 상한 — 압축 폭탄 방지
+MAX_ZIP_UNPACKED_BYTES = 64 * 1024 * 1024
 
 
 class ParseError(ValueError):
@@ -39,8 +45,9 @@ def decode_text(data: bytes) -> str:
 
 
 def parse_upload(filename: str, data: bytes) -> ParsedText:
-    suffix = PurePath(filename).suffix.lower()
-    stem = PurePath(filename).stem or None
+    name = PurePath(clean_line(filename).replace("\\", "/")).name
+    suffix = PurePath(name).suffix.lower()
+    stem = PurePath(name).stem or None
 
     if suffix in (".txt", ".md"):
         return ParsedText(decode_text(data), stem)
@@ -63,14 +70,15 @@ def parse_upload(filename: str, data: bytes) -> ParsedText:
 
 def _parse_pdf(data: bytes) -> str:
     from pypdf import PdfReader
-    from pypdf.errors import PdfReadError
 
     try:
         reader = PdfReader(io.BytesIO(data))
         if reader.is_encrypted:
             raise ParseError("암호가 걸린 PDF는 읽을 수 없습니다. 암호를 해제한 뒤 올려 주세요.")
         pages = [(page.extract_text() or "").strip() for page in reader.pages]
-    except PdfReadError as exc:
+    except ParseError:
+        raise
+    except Exception as exc:  # 손상·비정상 PDF는 pypdf가 여러 종류의 예외를 던진다
         raise ParseError("PDF 파일을 읽을 수 없습니다. 파일이 손상되지 않았는지 확인해 주세요.") from exc
 
     text = "\n\n".join(p for p in pages if p)
@@ -82,9 +90,20 @@ def _parse_pdf(data: bytes) -> str:
     return text
 
 
+def _open_zip(data: bytes, kind: str) -> zipfile.ZipFile:
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise ParseError(f"{kind} 파일을 열 수 없습니다. 파일이 손상되지 않았는지 확인해 주세요.") from exc
+    if sum(info.file_size for info in archive.infolist()) > MAX_ZIP_UNPACKED_BYTES:
+        raise ParseError(f"{kind} 파일의 내용이 너무 큽니다. 파일을 나눠서 올려 주세요.")
+    return archive
+
+
 def _parse_docx(data: bytes) -> str:
     import docx
 
+    _open_zip(data, "DOCX")
     try:
         document = docx.Document(io.BytesIO(data))
     except Exception as exc:  # python-docx는 손상 파일에 다양한 예외를 던진다
@@ -108,11 +127,11 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _hwpx_paragraphs(root: ElementTree.Element) -> list[str]:
+def _hwpx_paragraphs(root: Element) -> list[str]:
     """<p> 단위로 <t> 텍스트를 모은다. 표 안의 문단처럼 중첩된 <p>는 따로 센다."""
     paragraphs: list[str] = []
 
-    def walk(element: ElementTree.Element, buffer: list[str]) -> None:
+    def walk(element: Element, buffer: list[str]) -> None:
         name = _local_name(element.tag)
         if name == "p":
             own: list[str] = []
@@ -139,10 +158,7 @@ def _hwpx_paragraphs(root: ElementTree.Element) -> list[str]:
 
 
 def _parse_hwpx(data: bytes) -> str:
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile as exc:
-        raise ParseError("HWPX 파일을 열 수 없습니다. 파일이 손상되지 않았는지 확인해 주세요.") from exc
+    archive = _open_zip(data, "HWPX")
 
     sections = []
     for name in archive.namelist():
@@ -152,16 +168,12 @@ def _parse_hwpx(data: bytes) -> str:
     if not sections:
         raise ParseError("HWPX 파일에서 본문을 찾지 못했습니다.")
 
-    # 압축 폭탄 방지: 본문 XML의 압축 해제 크기 합계를 제한한다.
-    unpacked = sum(archive.getinfo(name).file_size for _, name in sections)
-    if unpacked > MAX_HWPX_UNPACKED_BYTES:
-        raise ParseError("HWPX 본문이 너무 큽니다. 파일을 나눠서 올려 주세요.")
-
     paragraphs: list[str] = []
     for _, name in sorted(sections):
         try:
-            root = ElementTree.fromstring(archive.read(name))
-        except ElementTree.ParseError as exc:
+            # DTD·엔티티 선언을 거부해 엔티티 폭탄·외부 엔티티 공격을 막는다
+            root = safe_fromstring(archive.read(name), forbid_dtd=True)
+        except (XMLParseError, DefusedXmlException) as exc:
             raise ParseError("HWPX 본문 구조를 해석할 수 없습니다.") from exc
         paragraphs.extend(_hwpx_paragraphs(root))
 

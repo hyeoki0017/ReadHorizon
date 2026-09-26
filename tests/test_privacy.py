@@ -69,3 +69,9 @@ def test_purge_removes_inactive_works_only(store):
     assert store.get_work(ws, old_id, touch=False) is None
     assert store.get_work(ws, new_id, touch=False) is not None
     assert store.get_paragraphs(old_id) == []
+
+
+def test_purge_if_due_runs_at_most_once_per_interval(store):
+    assert store.purge_if_due(180, interval_seconds=3600) == 0
+    assert store.purge_if_due(180, interval_seconds=3600) is None
+    assert store.purge_if_due(180, interval_seconds=0) == 0

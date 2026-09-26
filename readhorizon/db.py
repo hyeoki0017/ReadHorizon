@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -103,11 +104,15 @@ class Store:
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
+            if self.path != ":memory:":
+                # 여러 워커 프로세스가 같은 파일을 쓸 때 읽기·쓰기 충돌을 줄인다
+                self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=10000")
             self._conn.executescript(SCHEMA)
-        self.reference_version = 0  # 참고자료가 바뀔 때마다 증가(검색 색인 갱신용)
+        self._last_purge: float | None = None
 
     @contextmanager
     def tx(self):
@@ -218,7 +223,7 @@ class Store:
     def list_analyses(self, work_id: str) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT kind, option, result_json FROM analyses WHERE work_id = ? ORDER BY created_at", (work_id,)
+                "SELECT kind, option, result_json FROM analyses WHERE work_id = ? ORDER BY created_at, rowid", (work_id,)
             ).fetchall()
         return [{"kind": r["kind"], "option": r["option"], "result": _loads(r["result_json"])} for r in rows]
 
@@ -247,7 +252,7 @@ class Store:
     def list_questions(self, work_id: str) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, question, result_json, created_at FROM questions WHERE work_id = ? ORDER BY created_at",
+                "SELECT id, question, result_json, created_at FROM questions WHERE work_id = ? ORDER BY created_at, rowid",
                 (work_id,),
             ).fetchall()
         return [
@@ -265,6 +270,15 @@ class Store:
                 (workspace_id, cutoff),
             ).fetchall()
         return {r["category"]: r["total"] for r in rows}
+
+    def purge_if_due(self, retention_days: int, interval_seconds: float = 3600) -> int | None:
+        """마지막 정리 후 interval_seconds가 지났으면 보관 기간 정리를 실행한다(오래 켜 둔 서버용)."""
+        current = time.monotonic()
+        with self._lock:
+            if self._last_purge is not None and current - self._last_purge < interval_seconds:
+                return None
+            self._last_purge = current
+        return self.purge_inactive(retention_days)
 
     def purge_inactive(self, retention_days: int, now: datetime | None = None) -> int:
         current = now or datetime.now(timezone.utc)
@@ -298,8 +312,13 @@ class Store:
                 "INSERT INTO reference_chunks (ref_id, idx, text) VALUES (?, ?, ?)",
                 [(ref_id, i, text) for i, text in enumerate(chunks)],
             )
-        self.reference_version += 1
         return ref_id
+
+    def reference_fingerprint(self) -> tuple:
+        """참고자료가 바뀌었는지 가볍게 확인하는 값(다른 프로세스·CLI에서 가져온 자료도 감지)."""
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*), MAX(rowid), MAX(created_at) FROM reference_docs").fetchone()
+        return tuple(row)
 
     def all_reference_chunks(self) -> list[dict]:
         with self._lock:

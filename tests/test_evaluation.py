@@ -50,3 +50,10 @@ def test_load_items_validation(tmp_path):
     path.write_text(json.dumps([{"id": 1, "passage": "p", "question": "q", "choices": ["a"], "answer": 1}]))
     with pytest.raises(BenchmarkError, match="5개"):
         load_items(path)
+
+
+def test_load_items_rejects_non_objects(tmp_path):
+    path = tmp_path / "items.json"
+    path.write_text(json.dumps(["문항"]), encoding="utf-8")
+    with pytest.raises(BenchmarkError, match="객체"):
+        load_items(path)

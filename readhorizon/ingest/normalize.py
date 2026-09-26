@@ -1,19 +1,29 @@
 """텍스트 → 공통 문서 구조(섹션 > 문단).
 
+- 모든 입력은 유니코드 NFC로 정규화한다(macOS 등에서 오는 NFD 한글을 완성형으로 맞춰 검색·대조가 어긋나지 않게).
+  옛한글처럼 완성형이 없는 자모 조합은 NFC에서도 그대로 남는다.
 - 산문: 문단 단위. PDF처럼 줄이 강제로 끊긴 텍스트는 문장 끝이 아닌 줄을 다음 줄과 잇는다.
 - 운문(시·시조 등): 행 단위로 나누고 '1연 2행'처럼 번호를 붙인다. 원문 인용을 행까지 정밀하게 하기 위해서다.
 - 마크다운 헤딩('# 제목')은 섹션 제목으로 쓰고 문단에는 넣지 않는다.
+- 너무 긴 문단은 문장 경계에서 나눈다(인용 정밀도와 긴 작품 발췌를 위해).
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 # 문장이 끝난 줄로 보는 마지막 글자(따옴표·말줄임표 포함)
 TERMINAL_CHARS = ".?!。…\"'”’」』)]"
-INVISIBLE_RE = re.compile(r"[​‌‍﻿]")
+INVISIBLE_RE = re.compile(
+    "[\N{ZERO WIDTH SPACE}\N{ZERO WIDTH NON-JOINER}\N{ZERO WIDTH JOINER}\N{ZERO WIDTH NO-BREAK SPACE}]"
+)
+# 줄바꿈·탭을 뺀 제어 문자
+CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+SENTENCE_END_RE = re.compile(r"(?<=[.?!。…])\s+")
+MAX_PARAGRAPH_CHARS = 2000
 
 
 @dataclass
@@ -24,9 +34,16 @@ class Paragraph:
     text: str
 
 
-def clean_text(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n").replace(" ", " ")
-    return INVISIBLE_RE.sub("", text)
+def clean_text(text: str | None) -> str:
+    """여러 줄 텍스트 정리: NFC, 줄바꿈 통일, 보이지 않는 문자·제어 문자 제거."""
+    text = unicodedata.normalize("NFC", text or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\N{NO-BREAK SPACE}", " ")
+    return CONTROL_RE.sub("", INVISIBLE_RE.sub("", text))
+
+
+def clean_line(text: str | None) -> str:
+    """한 줄 입력(제목·저자 등) 정리: clean_text + 공백 하나로 합치기."""
+    return re.sub(r"\s+", " ", clean_text(text)).strip()
 
 
 def _content_lines(text: str) -> list[str]:
@@ -81,6 +98,29 @@ def _join_prose_lines(lines: list[str]) -> list[str]:
     return [re.sub(r"\s+", " ", p).strip() for p in paragraphs if p.strip()]
 
 
+def split_long(text: str, limit: int = MAX_PARAGRAPH_CHARS) -> list[str]:
+    """limit보다 긴 문단을 문장 경계에서 나눈다. 한 문장이 limit보다 길면 글자 수로 자른다."""
+    if len(text) <= limit:
+        return [text]
+    pieces: list[str] = []
+    current = ""
+    for sentence in SENTENCE_END_RE.split(text):
+        while len(sentence) > limit:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(sentence[:limit])
+            sentence = sentence[limit:]
+        if current and len(current) + 1 + len(sentence) > limit:
+            pieces.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}" if current else sentence
+    if current:
+        pieces.append(current)
+    return [p.strip() for p in pieces if p.strip()]
+
+
 def normalize_text(text: str, verse: bool) -> list[Paragraph]:
     blocks = _blocks(clean_text(text))
     paragraphs: list[Paragraph] = []
@@ -96,12 +136,14 @@ def normalize_text(text: str, verse: bool) -> list[Paragraph]:
             single_stanza = per_section_blocks[section] == 1
             for line_no, line in enumerate(lines, start=1):
                 label = f"{line_no}행" if single_stanza else f"{stanza}연 {line_no}행"
-                paragraphs.append(Paragraph(len(paragraphs), label, section, line))
+                for piece in split_long(line):
+                    paragraphs.append(Paragraph(len(paragraphs), label, section, piece))
         return paragraphs
 
     for section, lines in blocks:
-        for text_para in _join_prose_lines(lines):
-            paragraphs.append(Paragraph(len(paragraphs), f"{len(paragraphs) + 1}문단", section, text_para))
+        for joined in _join_prose_lines(lines):
+            for piece in split_long(joined):
+                paragraphs.append(Paragraph(len(paragraphs), f"{len(paragraphs) + 1}문단", section, piece))
     return paragraphs
 
 

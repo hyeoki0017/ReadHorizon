@@ -208,3 +208,19 @@ def test_is_supported_ignores_whitespace():
     assert is_supported("한 점  부끄럼이", "[1연 2행] 한 점 부끄럼이 없기를,")
     assert not is_supported("", "아무거나")
     assert not is_supported("없는 문장", "다른 문장")
+
+
+def test_select_paragraphs_never_returns_empty():
+    giant = [Paragraph(0, "1문단", None, "가" * 10_000), Paragraph(1, "2문단", None, "나" * 10_000)]
+    selected, excerpted = select_paragraphs(giant, 5000, None)
+    assert excerpted and [p.index for p in selected] == [0]
+    selected, _ = select_paragraphs(giant, 5000, "전혀 없는 질문")
+    assert selected
+
+
+def test_select_paragraphs_keeps_relevant_paragraph_even_if_neighbor_is_large():
+    paragraphs = [Paragraph(i, f"{i + 1}문단", None, "다" * 100) for i in range(50)]
+    paragraphs[9] = Paragraph(9, "10문단", None, "라" * 1900)  # 관련 문단 바로 앞의 큰 문단
+    paragraphs[10] = Paragraph(10, "11문단", None, "별이 바람에 스치운다")
+    selected, _ = select_paragraphs(paragraphs, 1000, "별이 바람에 스치운다")
+    assert 10 in [p.index for p in selected]
