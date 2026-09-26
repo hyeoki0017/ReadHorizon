@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# 로컬 설정·데이터 (원문·분석 결과가 들어 있으므로 커밋 금지)
+.env
+data/
+*.db
+*.db-journal
+
+# 기타
+.DS_Store
+screenshots/

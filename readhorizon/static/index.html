@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReadHorizon</title>
+  <meta name="description" content="근거 기반 텍스트 분석·독해 도우미 — 문학, 학습·연구, 사용자 지정 자료">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">ReadHorizon</span>
+      <span class="brand-sub">근거 기반 독해 도우미</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="mode-badge" class="mode-badge" hidden></span>
+      <button id="privacy-btn" type="button" class="btn ghost">개인정보 고지</button>
+    </div>
+  </header>
+
+  <div id="notice-banner" class="notice-banner" role="region" aria-label="개인정보 고지 알림" hidden>
+    <span>최근 30일 동안의 개인정보 처리 항목(수집 항목 · 자동 마스킹 항목)을 확인해 주세요.</span>
+    <button id="notice-open" type="button" class="btn">고지 보기</button>
+    <button id="notice-dismiss" type="button" class="btn ghost icon" aria-label="알림 닫기">×</button>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="내 자료실">
+      <button id="new-work-btn" type="button" class="btn primary block">+ 새 작품 등록</button>
+      <h2 class="sidebar-title">내 자료실</h2>
+      <ul id="work-list" class="work-list"></ul>
+      <p id="sidebar-note" class="sidebar-note"></p>
+    </aside>
+
+    <main id="main">
+      <section id="empty-state" class="empty-state">
+        <h1>읽고 싶은 텍스트를 올려 보세요</h1>
+        <p>원문에 근거한 분석만 보여 드립니다. 인용 표시를 누르면 원문의 해당 위치로 이동합니다.</p>
+        <div class="category-cards">
+          <article class="category-card">
+            <h2>문학</h2>
+            <p>소설 · 시 · 희곡 · 수필 — 화자, 시점, 표현, 갈등, 주제</p>
+          </article>
+          <article class="category-card">
+            <h2>학습·연구</h2>
+            <p>수능 독서·문학(고전 포함) · 논문 · 교재 — 문단 요지, 출제 포인트</p>
+          </article>
+          <article class="category-card">
+            <h2>사용자 지정</h2>
+            <p>기사 · 강의 자료 · 기타 — 내 자료실 안에서만 쓰입니다</p>
+          </article>
+        </div>
+        <ul class="trust-legend">
+          <li><span class="chip chip-work">원문</span> 작품 원문 인용(1차 근거)</li>
+          <li><span class="chip chip-tier-a">A등급</span> 공식·학술 &nbsp;<span class="chip chip-tier-b">B등급</span> 사전·평론</li>
+          <li><span class="chip chip-tier-c">C등급</span> 참고용 · <span class="chip chip-intro">소개글</span> 사용자 제공 책 소개(해석 근거 아님)</li>
+        </ul>
+      </section>
+
+      <section id="work-view" class="work-view" hidden>
+        <div class="work-header">
+          <div>
+            <h1 id="work-title"></h1>
+            <p id="work-meta" class="work-meta"></p>
+          </div>
+          <button id="delete-work-btn" type="button" class="btn ghost danger">삭제</button>
+        </div>
+        <div id="work-cards" class="work-cards"></div>
+
+        <nav class="pane-tabs" aria-label="보기 전환">
+          <button type="button" data-pane="pane-text" class="active">원문</button>
+          <button type="button" data-pane="pane-analysis">분석</button>
+          <button type="button" data-pane="pane-qa">질의응답</button>
+        </nav>
+
+        <div class="panes">
+          <section id="pane-text" class="pane active" aria-label="원문">
+            <h2 class="pane-title">원문</h2>
+            <div id="text-body" class="text-body"></div>
+          </section>
+
+          <section id="pane-analysis" class="pane" aria-label="분석">
+            <h2 class="pane-title">분석</h2>
+            <div id="kind-tabs" class="kind-tabs" role="tablist"></div>
+            <div class="analysis-controls">
+              <select id="translate-target" aria-label="번역·풀이 방식" hidden></select>
+              <button id="run-analysis" type="button" class="btn primary">분석하기</button>
+              <button id="refresh-analysis" type="button" class="btn ghost" hidden>다시 분석</button>
+            </div>
+            <div id="analysis-body" class="analysis-body"></div>
+          </section>
+
+          <section id="pane-qa" class="pane" aria-label="질의응답">
+            <h2 class="pane-title">질의응답</h2>
+            <div id="qa-list" class="qa-list"></div>
+            <form id="qa-form" class="qa-form">
+              <textarea id="qa-input" rows="3" maxlength="4000"
+                placeholder="예: 3연에서 화자의 태도는 어떻게 바뀌나요? (선지를 함께 붙여넣으면 선지별 근거와 정답을 판단합니다)"></textarea>
+              <button type="submit" class="btn primary">질문하기</button>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="new-work-dialog" class="dialog" aria-labelledby="new-work-title">
+    <form id="new-work-form" method="dialog" novalidate>
+      <header class="dialog-header">
+        <h2 id="new-work-title">새 작품 등록</h2>
+        <button type="button" class="btn ghost icon" data-close aria-label="닫기">×</button>
+      </header>
+
+      <fieldset class="field">
+        <legend>카테고리</legend>
+        <div id="category-options" class="segmented"></div>
+      </fieldset>
+
+      <label class="field">
+        <span>장르</span>
+        <select id="genre-select" name="genre" required></select>
+      </label>
+
+      <div id="bib-section" class="field" hidden>
+        <span>서지 검색 <small>(국립중앙도서관 · 제목 또는 ISBN만 전송)</small></span>
+        <div class="inline">
+          <input id="bib-query" type="search" placeholder="제목 또는 ISBN">
+          <button id="bib-search-btn" type="button" class="btn">검색</button>
+        </div>
+        <ul id="bib-results" class="bib-results"></ul>
+        <p id="bib-selected" class="hint" hidden></p>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>제목</span>
+          <input name="title" maxlength="200" placeholder="비우면 파일 이름 또는 첫 줄">
+        </label>
+        <label class="field">
+          <span>저자</span>
+          <input name="author" maxlength="100">
+        </label>
+      </div>
+
+      <fieldset class="field">
+        <legend>원문</legend>
+        <div class="segmented" role="tablist">
+          <button type="button" class="seg active" data-source="file">파일 업로드</button>
+          <button type="button" class="seg" data-source="paste">붙여넣기</button>
+        </div>
+        <div id="source-file" class="source-panel">
+          <input id="file-input" name="file" type="file" accept=".txt,.md,.pdf,.docx,.hwpx">
+          <p class="hint">TXT · MD · PDF · DOCX · HWPX. HWP(5.0)는 한글에서 HWPX나 PDF로 저장해 올려 주세요.</p>
+        </div>
+        <div id="source-paste" class="source-panel" hidden>
+          <textarea name="text" rows="8" placeholder="작품 원문을 붙여넣으세요. 시는 행과 연(빈 줄)을 그대로 두세요."></textarea>
+        </div>
+      </fieldset>
+
+      <details class="field intro-details">
+        <summary>책 소개 붙여넣기 (선택)</summary>
+        <p class="hint">
+          서점 등의 책 소개를 직접 복사해 붙여넣을 수 있어요. 소개글은 홍보 목적일 수 있어 해석 근거로 쓰지 않고
+          <span class="chip chip-intro">소개글</span>로 따로 표시합니다. 원문 없이 소개글만 넣으면 <strong>읽기 가이드</strong>만 제공합니다.
+        </p>
+        <textarea name="intro_text" rows="4" maxlength="5000" placeholder="책 소개 (최대 5,000자)"></textarea>
+        <input name="intro_source_url" type="url" maxlength="500" placeholder="출처 URL (선택, 링크 표시용 · 자동 수집하지 않음)">
+      </details>
+
+      <p class="privacy-hint">
+        올린 원문과 소개글은 내 자료실에서만 쓰이며 공용 DB나 AI 학습에 쓰이지 않습니다.
+        주민번호·전화번호·이메일 등은 저장 전에 자동으로 가려집니다.
+      </p>
+
+      <footer class="dialog-footer">
+        <button type="button" class="btn ghost" data-close>취소</button>
+        <button id="submit-work" type="submit" class="btn primary" value="default">등록</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="privacy-dialog" class="dialog" aria-labelledby="privacy-title">
+    <header class="dialog-header">
+      <h2 id="privacy-title">개인정보 수집 항목 고지</h2>
+      <button type="button" class="btn ghost icon" data-close aria-label="닫기">×</button>
+    </header>
+    <div id="privacy-body" class="privacy-body"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
