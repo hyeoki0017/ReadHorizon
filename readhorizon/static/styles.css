@@ -257,6 +257,8 @@ select, input, textarea {
 .badge-medium { color: var(--warn); }
 .badge-low { color: var(--low); }
 .badge-intro { color: var(--intro); }
+.inline-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.inline-check input { width: auto; margin: 0; }
 .reader-profile { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
 .reader-profile label { display: flex; align-items: center; gap: 6px; }
 .reader-profile select { width: auto; font-size: 13px; padding: 4px 8px; }
@@ -274,6 +276,15 @@ select, input, textarea {
   .glossary-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
   .glossary-row .g-note { grid-column: 1 / span 2; }
 }
+.review-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.review { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.review summary { cursor: pointer; font-weight: 600; }
+.review ul { margin: 8px 0; padding-left: 18px; display: grid; gap: 6px; }
+.review-summary { margin: 6px 0 0; color: var(--muted); }
+.issue-tag { font-size: 12px; color: var(--muted); }
+.issue.sev-major .issue-tag { color: var(--low); font-weight: 600; }
+.suggestion { margin-top: 2px; color: var(--accent); }
+.review-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .checks { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
 .checks-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .checks ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }

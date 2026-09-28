@@ -8,6 +8,7 @@
    "key_points": ["결과가 반드시 짚어야 할 내용", ...],
    "reference": "모범 번역·해설(선택)",
    "audience": 독자 수준(선택: elementary·middle·high·general·expert), "lang": 설명 언어(선택: ko·en),
+   "layered": 직역·의역·주석 3층 번역(선택, translate + modern·en·ko일 때),
    "source": "출처·이용 조건"}
 
 채점 방식
@@ -16,6 +17,8 @@
   번역 평가에서 흔히 쓰는 오류 분류(MQM)를 단순화한 것이다. 오류 점수 = major 5점 + minor 1점.
 - 인용 대조·근거율·번역 자동 검사(누락 문단·숫자·분량)는 모델 없이 계산해 함께 싣는다.
 - 채점자 결과는 사람 채점과 일치하는지 표본으로 확인한 뒤에 기준으로 삼는다(docs/design.md).
+- revise=True(명령줄 --revise)면 초안 → 심화 검토 → 검토 반영 재작성까지 거친 최종본을 채점한다.
+  같은 문항을 --revise 없이 돌린 결과와 --baseline으로 비교해 심화 모드의 효과를 잰다.
 
 평가를 한 번 돌릴 때마다 생성·채점 API 비용이 든다. 결과의 usage에 토큰 합계를 싣는다.
 """
@@ -28,10 +31,12 @@ from typing import Protocol
 
 from .analysis.engine import AnalysisEngine, WorkContext
 from .analysis.llm import JSONResult
+from .analysis.review import ERROR_CATEGORIES, rendered_output
 from .analysis.presets import (
     AUDIENCES,
     EXPLAIN_LANGUAGES,
     KINDS,
+    LAYERED_TARGETS,
     TRANSLATE_TARGETS,
     ReaderProfile,
     find_genre,
@@ -39,7 +44,6 @@ from .analysis.presets import (
 )
 from .ingest.normalize import looks_like_verse, normalize_text
 
-ERROR_CATEGORIES = ["누락", "추가", "오역", "용어", "어색함", "문체", "사실 오류", "근거 없는 주장", "해석 단정"]
 SEVERITY_POINTS = {"major": 5, "minor": 1}
 VERDICT_SCORE = {"yes": 1.0, "partial": 0.5, "no": 0.0}
 USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -123,6 +127,8 @@ def load_items(path: Path) -> list[dict]:
         points = item["key_points"]
         if not isinstance(points, list) or not points or not all(isinstance(p, str) and p.strip() for p in points):
             raise QualityEvalError(f"{i}번째 문항의 key_points는 비어 있지 않은 문자열 목록이어야 합니다.")
+        if item.get("layered") and (item["kind"] != "translate" or item.get("option", "easy") not in LAYERED_TARGETS):
+            raise QualityEvalError(f"{i}번째 문항: layered는 번역 대상이 {', '.join(LAYERED_TARGETS)}일 때만 쓸 수 있습니다.")
         if item.get("audience", "") not in ("", *AUDIENCES):
             raise QualityEvalError(f"{i}번째 문항의 audience는 {', '.join(AUDIENCES)} 중 하나여야 합니다.")
         if item.get("lang", "ko") not in EXPLAIN_LANGUAGES:
@@ -141,17 +147,6 @@ def _context(item: dict) -> WorkContext:
 
 def _profile(item: dict) -> ReaderProfile:
     return ReaderProfile.of(item.get("audience", ""), item.get("lang", "ko"))
-
-
-def rendered_output(result: dict) -> str:
-    """채점자에게 보여 줄 결과 텍스트. 인용이 붙은 조각 뒤에 [근거: 위치]를 붙인다."""
-    out = []
-    for seg in result.get("segments") or []:
-        out.append(seg.get("text") or "")
-        labels = [label for c in seg.get("citations") or [] if c.get("source") == "work" for label in c.get("labels") or []]
-        if labels:
-            out.append(f" [근거: {', '.join(dict.fromkeys(labels))}]")
-    return "".join(out).strip()
 
 
 def judge_prompt(item: dict, ctx: WorkContext, result: dict) -> str:
@@ -239,6 +234,7 @@ def _summary(rows: list[dict]) -> dict:
         "mean_grounding_ratio": _mean([r["grounding_ratio"] for r in rows]),
         "unverified_citations": sum(r["unverified_citations"] for r in rows),
         "translation_checks_passed": f"{sum(1 for r in translated if r['checks']['ok'])}/{len(translated)}",
+        "revised_items": sum(1 for r in rows if (r.get("review") or {}).get("revised")),
     }
     by_kind: dict[str, list[dict]] = {}
     for r in judged:
@@ -264,7 +260,9 @@ def compare(summary: dict, baseline: dict) -> dict:
     return delta
 
 
-def run_quality_eval(engine: AnalysisEngine, judge: JudgeClient | None, items: list[dict]) -> dict:
+def run_quality_eval(
+    engine: AnalysisEngine, judge: JudgeClient | None, items: list[dict], revise: bool = False
+) -> dict:
     # API 비용을 쓰기 전에 모든 문항을 먼저 확인한다
     contexts = []
     for item in items:
@@ -276,12 +274,22 @@ def run_quality_eval(engine: AnalysisEngine, judge: JudgeClient | None, items: l
         contexts.append(ctx)
 
     rows = []
-    usage: dict[str, dict] = {"generation": {}, "judge": {}}
+    usage: dict[str, dict] = {"generation": {}, "review": {}, "judge": {}}
     for item, ctx in zip(items, contexts, strict=True):
         kind = item["kind"]
-        option = f"{item.get('option', 'easy')}:1" if kind == "translate" else ""
-        result = engine.analyze(ctx, kind, option, _profile(item))
+        option = ""
+        if kind == "translate":
+            option = f"{item.get('option', 'easy')}:1" + (":layers" if item.get("layered") else "")
+        profile = _profile(item)
+        result = engine.analyze(ctx, kind, option, profile)
         _add_usage(usage["generation"], result.get("usage"))
+        review = None
+        if revise:
+            review = engine.review(ctx, result)
+            _add_usage(usage["review"], review.get("usage"))
+            if review["issues"]:
+                result = engine.analyze(ctx, kind, option, profile, None, review["issues"])
+                _add_usage(usage["generation"], result.get("usage"))
         row = {
             "id": item["id"],
             "kind": kind,
@@ -292,6 +300,8 @@ def run_quality_eval(engine: AnalysisEngine, judge: JudgeClient | None, items: l
             "checks": result.get("checks"),
             "coverage": None,
         }
+        if review is not None:
+            row["review"] = {"issues": len(review["issues"]), "major": review["major"], "revised": bool(review["issues"])}
         if judge is not None:
             judged = judge.complete_json(JUDGE_SYSTEM, judge_prompt(item, ctx, result), JUDGE_SCHEMA)
             _add_usage(usage["judge"], judged.usage)
@@ -301,6 +311,7 @@ def run_quality_eval(engine: AnalysisEngine, judge: JudgeClient | None, items: l
         "judge_model": getattr(judge, "model", None),
         "generator_model": getattr(engine.llm, "model", None),
         "generator_mode": engine.llm.mode,
+        "revise": revise,
         "summary": _summary(rows),
         "usage": usage,
         "items": rows,

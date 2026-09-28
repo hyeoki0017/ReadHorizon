@@ -31,8 +31,12 @@ ADAPTIVE_PREFIXES = (
     "claude-sonnet-4-6",
 )
 MAX_TOKENS = 32000
+# 번역은 결과가 원문 분량만큼(3층이면 2~3배) 길어 응답 한도를 더 준다(스트리밍이라 시간 초과 걱정 없음)
+TRANSLATE_MAX_TOKENS = 64000
 OCR_MAX_TOKENS = 64000
 JSON_MAX_TOKENS = 32000
+# 번역은 결과가 원문 분량만큼(3층이면 2~3배) 길어 응답 한도를 더 준다(스트리밍이라 시간 초과 걱정 없음)
+TRANSLATE_MAX_TOKENS = 64000
 
 # 전사 결과 형식(구조화 출력). text의 [?]·[?글자] 표시는 판독이 불확실한 글자다.
 OCR_SCHEMA = {
@@ -144,7 +148,7 @@ class ClaudeClient:
             request["fallbacks"] = "default"
         return request
 
-    def build_request(self, system: str, docs: list[DocSpec], task: str) -> dict:
+    def build_request(self, system: str, docs: list[DocSpec], task: str, max_tokens: int = MAX_TOKENS) -> dict:
         content: list[dict] = []
         for doc in docs:
             block: dict = {"type": "document", "title": doc.title[:200], "citations": {"enabled": True}}
@@ -159,7 +163,7 @@ class ClaudeClient:
 
         request: dict = {
             "model": self.model,
-            "max_tokens": MAX_TOKENS,
+            "max_tokens": max_tokens,
             "system": [{"type": "text", "text": system}],
             "messages": [{"role": "user", "content": content}],
         }
@@ -203,7 +207,8 @@ class ClaudeClient:
         return self._model_options(request, self.effort)
 
     def generate(self, system: str, docs: list[DocSpec], task: str, meta: dict) -> LLMResult:
-        return parse_message(self._stream(self.build_request(system, docs, task)))
+        max_tokens = TRANSLATE_MAX_TOKENS if meta.get("kind") == "translate" else MAX_TOKENS
+        return parse_message(self._stream(self.build_request(system, docs, task, max_tokens)))
 
     def complete_json(self, system: str, prompt: str, schema: dict, meta: dict | None = None) -> JSONResult:
         """구조화 출력으로 JSON 객체를 받는다(용어 뽑기, 품질 평가 채점 등). meta는 데모 응답용."""
@@ -339,7 +344,19 @@ class DemoClient:
         )
 
     def complete_json(self, system: str, prompt: str, schema: dict, meta: dict | None = None) -> JSONResult:
-        if (meta or {}).get("kind") != "glossary":
+        kind = (meta or {}).get("kind")
+        if kind == "review":
+            # 검토·수정 흐름을 확인하기 위한 결정적 응답
+            labels = meta.get("labels") or ["전체"]
+            issue = {
+                "location": labels[0],
+                "category": "어색함",
+                "severity": "minor",
+                "explanation": "(데모) 원문과 대조한 검토 결과가 여기에 표시됩니다.",
+                "suggestion": "(데모) 고친 문장이 여기에 표시됩니다.",
+            }
+            return JSONResult({"issues": [issue], "summary": "(데모) 검토 요약입니다. 실제 검토가 아닙니다."}, self.model)
+        if kind != "glossary":
             raise LLMError("데모 모드에서는 이 기능을 쓸 수 없습니다. ANTHROPIC_API_KEY를 설정해 주세요.")
         # 용어 뽑기 흐름을 확인하기 위한 결정적 응답: 원문에서 처음 나오는 두 글자 이상 낱말 3개
         words: list[str] = []
@@ -389,6 +406,16 @@ class DemoClient:
                 blocks.append(RawBlock("\n"))
             if meta.get("multiple_choice"):
                 blocks.append(RawBlock("\n정답: 판단 불가(데모)\n"))
+        elif kind == "translate" and meta.get("layered"):
+            blocks.append(RawBlock("## 번역·풀이 — 직역·의역·주석\n"))
+            for pos in range(count):
+                label = doc.blocks[pos].split("]", 1)[0].lstrip("[")
+                blocks.append(RawBlock(f"### [{label}]\n- **직역**: "))
+                blocks.append(cite_work(pos, short(doc.blocks[pos])))
+                blocks.append(RawBlock("\n- **의역**: "))
+                blocks.append(cite_work(pos, "(데모) 자연스럽게 옮긴 문장이 여기에 표시됩니다."))
+                blocks.append(RawBlock("\n"))
+                blocks.append(RawBlock("- **주석**: (데모) 옮기며 사라지는 뉘앙스가 여기에 표시됩니다.\n"))
         elif kind in ("flow", "translate"):
             heading = "## 문단 흐름" if kind == "flow" else "## 번역·풀이"
             note = "요지가" if kind == "flow" else "번역문이"

@@ -5,7 +5,7 @@
   python -m readhorizon purge
   python -m readhorizon eval samples/eval_items.sample.json
   python -m readhorizon eval-ocr samples/ocr/manifest.sample.json
-  python -m readhorizon eval-quality samples/quality_items.sample.json [--out 결과.json] [--baseline 이전결과.json]
+  python -m readhorizon eval-quality samples/quality_items.sample.json [--out 결과.json] [--baseline 이전결과.json] [--revise]
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     ev_quality.add_argument("--out", type=Path, help="결과 JSON을 저장할 파일")
     ev_quality.add_argument("--baseline", type=Path, help="비교할 이전 결과 JSON(--out으로 저장한 파일)")
     ev_quality.add_argument("--no-judge", action="store_true", help="AI 채점 없이 자동 지표만 계산")
+    ev_quality.add_argument("--revise", action="store_true", help="초안 → 심화 검토 → 검토 반영 재작성까지 거친 결과를 채점")
 
     args = parser.parse_args(argv)
     settings = load_settings()
@@ -152,9 +153,9 @@ def _eval_quality(args, settings, store) -> int:
     try:
         items = load_items(args.path)
         if live:
-            calls = len(items) * (2 if judge else 1)
-            print(f"문항 {len(items)}개 평가: Claude API를 {calls}회 호출합니다(비용 발생).", file=sys.stderr)
-        report = run_quality_eval(engine, judge, items)
+            calls = len(items) * (1 + (1 if judge else 0) + (2 if args.revise else 0))
+            print(f"문항 {len(items)}개 평가: Claude API를 최대 {calls}회 호출합니다(비용 발생).", file=sys.stderr)
+        report = run_quality_eval(engine, judge, items, revise=args.revise)
     except (QualityEvalError, LLMError) as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 1

@@ -433,12 +433,23 @@ function currentTarget() {
   return $("#translate-target").value || "easy";
 }
 
+// 직역·의역·주석 3층 보기는 현대어·영어·한국어 번역에서만 켤 수 있다
+function renderLayersToggle() {
+  const allowed = state.kind === "translate" && (state.meta.layered_targets || []).includes(currentTarget());
+  $("#layers-label").hidden = !allowed;
+}
+
 function analysisKey() {
-  const option = state.kind === "translate" ? `${currentTarget()}:${$("#translate-part").value || "1"}` : "";
+  let option = "";
+  if (state.kind === "translate") {
+    option = `${currentTarget()}:${$("#translate-part").value || "1"}`;
+    if (!$("#layers-label").hidden && $("#translate-layers").checked) option += ":layers";
+  }
   return { key: `${state.kind}:${option}${profileSuffix()}`, option };
 }
 
 function renderAnalysis() {
+  renderLayersToggle();
   const { key } = analysisKey();
   const result = state.current.analyses.get(key);
   syncGlossary();
@@ -450,10 +461,68 @@ function renderAnalysis() {
     body.innerHTML = `<p class="loading">'${escapeHtml(label)}'을(를) 실행하면 원문 인용과 함께 결과가 표시됩니다.</p>`;
     return;
   }
-  body.innerHTML = `<div class="result">${glossaryNote(result)}${resultHtml(result)}</div>`;
+  body.innerHTML = `<div class="result">${glossaryNote(result)}${reviewHtml(result)}${resultHtml(result)}</div>`;
 }
 
-async function runAnalysis(refresh) {
+// 심화 검토: 원문과 대조해 찾은 문제 목록과 "검토 반영해 다시 쓰기"
+function reviewHtml(result) {
+  const revised = result.revision
+    ? `<p class="note">검토 반영본입니다. 검토에서 찾은 문제 ${Number(result.revision.issues)}개를 고쳐 다시 썼습니다.</p>` : "";
+  const review = result.review;
+  if (!review) {
+    return `${revised}<div class="review-bar"><button type="button" class="btn ghost" data-action="review">원문과 대조해 검토하기</button>
+      <span class="hint">빠진 내용·오역·근거 없는 주장을 찾습니다(분석 1회 추가).</span></div>`;
+  }
+  const severity = { major: "중요", minor: "경미" };
+  const items = (review.issues || []).map((i) => {
+    const where = Number.isInteger(i.paragraph)
+      ? `<button type="button" class="check-para" data-index="${i.paragraph}">${escapeHtml(i.location)}</button>`
+      : `<strong>${escapeHtml(i.location)}</strong>`;
+    const suggestion = i.suggestion ? `<div class="suggestion">제안: ${escapeHtml(i.suggestion)}</div>` : "";
+    return `<li class="issue sev-${escapeHtml(i.severity)}">${where} <span class="issue-tag">${escapeHtml(i.category)} · ${severity[i.severity] || ""}</span> ${escapeHtml(i.explanation)}${suggestion}</li>`;
+  });
+  const count = items.length;
+  const demo = review.mode === "demo" ? " · 데모 응답" : "";
+  return `${revised}<details class="review" open>
+    <summary>심화 검토 — 문제 ${count}개${count ? ` (중요 ${Number(review.major) || 0})` : ""}${demo}</summary>
+    ${review.summary ? `<p class="review-summary">${escapeHtml(review.summary)}</p>` : ""}
+    ${count ? `<ul>${items.join("")}</ul>` : '<p class="hint">원문과 대조해 고칠 문제를 찾지 못했습니다.</p>'}
+    <div class="review-actions">
+      ${count ? '<button type="button" class="btn primary" data-action="revise">검토 반영해 다시 쓰기</button>' : ""}
+      <button type="button" class="btn ghost" data-action="review">다시 검토</button>
+    </div></details>`;
+}
+
+async function runReview() {
+  const current = state.current;
+  const kind = state.kind;
+  const { key, option } = analysisKey();
+  const profile = { ...state.profile };
+  const stillShowing = () => state.current === current && analysisKey().key === key;
+  $$("#analysis-body [data-action]").forEach((b) => { b.disabled = true; });
+  const trigger = $('#analysis-body [data-action="review"]');
+  if (trigger) trigger.textContent = "검토 중…";
+  try {
+    const result = await api(`/api/works/${current.work.id}/review`, {
+      method: "POST",
+      json: { kind, option, audience: profile.audience, lang: profile.lang },
+    });
+    current.analyses.set(key, result);
+    if (stillShowing()) renderAnalysis();
+  } catch (error) {
+    toast(error.message);
+    if (stillShowing()) renderAnalysis();
+  }
+}
+
+function onAnalysisAction(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button || button.disabled) return;
+  if (button.dataset.action === "review") runReview();
+  else if (button.dataset.action === "revise") runAnalysis(true, { revise: true });
+}
+
+async function runAnalysis(refresh, { revise = false } = {}) {
   // 요청 중에 다른 작품·분석 종류로 바꿔도 결과가 원래 작품에 저장되도록 시작 시점의 값을 고정한다
   const current = state.current;
   const kind = state.kind;
@@ -462,11 +531,13 @@ async function runAnalysis(refresh) {
   const stillShowing = () => state.current === current && analysisKey().key === key;
   const buttons = [$("#run-analysis"), $("#refresh-analysis")];
   buttons.forEach((b) => { b.disabled = true; });
-  $("#analysis-body").innerHTML = '<p class="loading">분석 중입니다… 긴 작품은 1~2분 걸릴 수 있어요.</p>';
+  $("#analysis-body").innerHTML = revise
+    ? '<p class="loading">검토 결과를 반영해 다시 쓰는 중입니다… 1~2분 걸릴 수 있어요.</p>'
+    : '<p class="loading">분석 중입니다… 긴 작품은 1~2분 걸릴 수 있어요.</p>';
   try {
     const result = await api(`/api/works/${current.work.id}/analyze`, {
       method: "POST",
-      json: { kind, option, refresh, audience: profile.audience, lang: profile.lang },
+      json: { kind, option, refresh, revise, audience: profile.audience, lang: profile.lang },
     });
     current.analyses.set(key, result);
     if (stillShowing()) renderAnalysis();
@@ -992,6 +1063,7 @@ async function init() {
   $("#refresh-analysis").addEventListener("click", () => runAnalysis(true));
   $("#translate-target").addEventListener("change", renderAnalysis);
   $("#translate-part").addEventListener("change", renderAnalysis);
+  $("#translate-layers").addEventListener("change", renderAnalysis);
   $("#audience").addEventListener("change", onProfileChange);
   $("#explain-lang").addEventListener("change", onProfileChange);
   $("#glossary-add").addEventListener("click", () => {
@@ -1016,6 +1088,7 @@ async function init() {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("#qa-form").requestSubmit();
   });
   $("#analysis-body").addEventListener("click", onCiteClick);
+  $("#analysis-body").addEventListener("click", onAnalysisAction);
   $("#qa-list").addEventListener("click", onCiteClick);
   $$(".pane-tabs button").forEach((b) => b.addEventListener("click", () => showPane(b.dataset.pane)));
   $("#delete-work-btn").addEventListener("click", async () => {

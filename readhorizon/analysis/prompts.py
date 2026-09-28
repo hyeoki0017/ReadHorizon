@@ -15,6 +15,8 @@ from .presets import AUDIENCES, EXPLAIN_LANGUAGES, TRANSLATE_TARGETS, Category, 
 DEFAULT_EXEMPLARS_PATH = Path(__file__).with_name("exemplars.json")
 MAX_EXEMPLAR_CHARS = 20_000  # 시스템 프롬프트가 지나치게 길어지지 않도록(토큰 비용)
 VOCAB_HEADINGS = {"ko": "어휘 풀이", "en": "Vocabulary"}
+# 3층 번역의 줄 이름(설명 언어별). 주석 줄은 번역 검사(숫자 비교)에서 뺀다
+LAYER_LABELS = {"ko": ("직역", "의역", "주석"), "en": ("Literal", "Free", "Notes")}
 
 BASE_SYSTEM_PROMPT = """당신은 ReadHorizon의 텍스트 분석 도우미입니다. 소설·시·희곡·수필·고전·논문·기사 등 텍스트의 문맥, 문단 흐름, 의미, 번역을 이해하도록 돕습니다. 요청문에 설명 언어가 따로 정해져 있지 않으면 한국어로 답합니다.
 
@@ -130,15 +132,31 @@ def glossary_lines(entries: list[dict]) -> str:
     return f"\n[용어집] 다음 번역어를 그대로 씁니다.\n{rows}"
 
 
-def translate_task(info: str, target: str, scope: str = "", lang: str = "ko", glossary: list[dict] | None = None) -> str:
+def translate_task(
+    info: str,
+    target: str,
+    scope: str = "",
+    lang: str = "ko",
+    glossary: list[dict] | None = None,
+    layered: bool = False,
+) -> str:
     target_label = TRANSLATE_TARGETS.get(target, TRANSLATE_TARGETS["easy"])
     scope_line = f"\n{scope}" if scope else ""
     vocab = VOCAB_HEADINGS.get(lang, VOCAB_HEADINGS["ko"])
+    if layered:
+        literal, free, note = LAYER_LABELS.get(lang, LAYER_LABELS["ko"])
+        body = f"""## {target_label} — {literal}·{free}·{note}
+- 제공된 원문의 모든 문단(운문은 행)을 순서대로 빠짐없이 옮깁니다. 위치마다 '### [위치]' 제목 아래 다음 줄을 씁니다.
+- '- **{literal}**: ' 원문의 낱말과 문장 구조를 되도록 따라 옮긴 문장. 이 줄에 해당 원문을 인용합니다.
+- '- **{free}**: ' 뜻과 어조를 살려 자연스럽게 옮긴 문장. 이 줄에도 해당 원문을 인용합니다.
+- '- **{note}**: ' 옮기면서 사라지는 뉘앙스·언어유희·문화나 역사 배경. 덧붙일 것이 없으면 이 줄을 쓰지 않습니다."""
+    else:
+        body = f"""## {target_label}
+- 제공된 원문의 모든 문단(운문은 행)을 순서대로 빠짐없이 '- [위치] 결과문' 형식으로 옮기고, 각 항목에 해당 원문을 인용합니다."""
     return f"""{info}{glossary_lines(glossary or [])}
 
 [요청] {target_label}{scope_line}
-## {target_label}
-- 제공된 원문의 모든 문단(운문은 행)을 순서대로 빠짐없이 '- [위치] 결과문' 형식으로 옮기고, 각 항목에 해당 원문을 인용합니다.
+{body}
 - 숫자·연도·단위·고유명사는 원문 그대로 유지합니다.
 - 뜻이 확실하지 않은 고어·한자어·전문용어는 '(뜻 불확실)'로 표시하고 추측으로 채우지 않습니다.
 ## {vocab}

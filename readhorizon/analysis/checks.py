@@ -22,6 +22,8 @@ NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 POSITION_RE = re.compile(r"\[[^\]\n]{1,20}\]|\d+\s*(?:문단|연|행)")
 VOCAB_HEADING_RE = re.compile(r"^\s*#{1,6}\s*(?:어휘\s*풀이|vocabulary)", re.MULTILINE | re.IGNORECASE)
 HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s.*$", re.MULTILINE)
+# 3층 번역의 주석 줄(배경 설명에는 원문에 없는 연도 등이 나올 수 있어 숫자·분량 비교에서 뺀다)
+NOTE_LINE_RE = re.compile(r"^\s*[-*]\s*\*{0,2}(?:주석|notes?)\*{0,2}\s*[:：].*$", re.MULTILINE | re.IGNORECASE)
 # 같은 언어 안의 풀이에만 분량 비율을 본다(언어가 바뀌면 글자 수를 비교할 수 없음)
 MIN_LENGTH_RATIO = {"modern": 0.4, "easy": 0.3}
 GLOSSARY_CHECK_TARGETS = {"en", "ko"}
@@ -85,7 +87,8 @@ def translation_checks(
         }
     ]
 
-    out_numbers = set(numbers(text))
+    core = NOTE_LINE_RE.sub("", text)
+    out_numbers = set(numbers(core))
     source_numbers: set[str] = set()
     missing_numbers: list[dict] = []
     for p in paragraphs:
@@ -107,7 +110,7 @@ def translation_checks(
     ratio = None
     if target in MIN_LENGTH_RATIO:
         source_chars = sum(len(squash(p.text)) for p in paragraphs)
-        out_chars = len(squash(POSITION_RE.sub("", HEADING_LINE_RE.sub("", text))))
+        out_chars = len(squash(POSITION_RE.sub("", HEADING_LINE_RE.sub("", core))))
         if source_chars:
             ratio = round(out_chars / source_chars, 2)
             short = ratio < MIN_LENGTH_RATIO[target]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from ..ingest.normalize import Paragraph, total_chars
 from ..references.search import BM25
@@ -19,6 +20,7 @@ from ..trust import INTRO_LABEL, INTRO_TIER, analysis_badge, tier_label
 from . import prompts
 from .checks import translation_checks
 from .glossary import GLOSSARY_SCHEMA, GLOSSARY_SYSTEM, MAX_EXTRACT, glossary_prompt, normalize_entries
+from .review import REVIEW_SCHEMA, REVIEW_SYSTEM, normalize_issues, review_prompt, revision_lines
 from .grounding import is_supported, strip_label, summarize
 from .llm import DocSpec, LLMClient, LLMResult
 from .presets import (
@@ -27,6 +29,7 @@ from .presets import (
     Category,
     Genre,
     ReaderProfile,
+    is_layered,
     parse_translate_option,
     translate_option,
 )
@@ -104,6 +107,12 @@ def split_parts(paragraphs: list[Paragraph], part_chars: int) -> list[list[Parag
     if current:
         parts.append(current)
     return parts
+
+
+def _revision_info(revision: list[dict] | None) -> dict:
+    if not revision:
+        return {}
+    return {"revision": {"issues": len(revision), "major": sum(1 for i in revision if i.get("severity") == "major")}}
 
 
 def relevant_entries(entries: list[dict], paragraphs: list[Paragraph]) -> list[dict]:
@@ -256,8 +265,10 @@ class AnalysisEngine:
         option: str = "",
         profile: ReaderProfile | None = None,
         glossary: dict | None = None,
+        revision: list[dict] | None = None,
     ) -> dict:
-        """profile: 독자 수준·설명 언어. glossary: 번역 용어집 {"entries": [...], "version": str}(번역에만 쓴다)."""
+        """profile: 독자 수준·설명 언어. glossary: 번역 용어집 {"entries": [...], "version": str}(번역에만 쓴다).
+        revision: 심화 검토에서 찾은 문제 목록. 주면 그 문제를 고쳐 처음부터 다시 쓴다."""
         profile = profile or ReaderProfile()
         if kind not in KINDS:
             raise AnalysisRequestError("알 수 없는 분석 종류입니다.")
@@ -267,7 +278,7 @@ class AnalysisEngine:
                 "작품 해석이 필요하면 원문을 올려 주세요."
             )
         if kind == "translate":
-            return self._translate(ctx, option, profile, glossary)
+            return self._translate(ctx, option, profile, glossary, revision)
 
         info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre, profile)
         if kind == "overview":
@@ -277,16 +288,20 @@ class AnalysisEngine:
         else:
             task, sections = prompts.guide_task(info, ctx.intro_only), list(prompts.GUIDE_SECTIONS)
 
+        task += revision_lines(revision or [])
         ref_query = f"{ctx.title} {ctx.author or ''} {ctx.genre.label} {' '.join(sections)}"
         docs, excerpted = self._documents(ctx, None, ref_query)
         if not docs:
             raise AnalysisRequestError("분석할 원문이나 소개글이 없습니다.")
         result = self.llm.generate(self.system_prompt, docs, task, {"kind": kind, "sections": sections})
-        extra = {"kind": kind, "option": profile.suffix, "profile": profile.to_dict()}
+        extra = {"kind": kind, "option": profile.suffix, "profile": profile.to_dict(), **_revision_info(revision)}
         return self._finish(ctx, result, docs, excerpted, extra)
 
-    def _translate(self, ctx: WorkContext, option: str, profile: ReaderProfile, glossary: dict | None) -> dict:
+    def _translate(
+        self, ctx: WorkContext, option: str, profile: ReaderProfile, glossary: dict | None, revision: list[dict] | None
+    ) -> dict:
         target, number = parse_translate_option(option)
+        layered = is_layered(option)
         parts = split_parts(ctx.paragraphs, self.part_chars)
         if number > len(parts):
             raise AnalysisRequestError(f"{number}부분은 없습니다. 이 작품의 번역 범위는 {len(parts)}부분입니다.")
@@ -299,24 +314,72 @@ class AnalysisEngine:
         )
         entries = list((glossary or {}).get("entries") or [])
         info = prompts.work_info_line(ctx.title, ctx.author, ctx.category, ctx.genre, profile)
-        task = prompts.translate_task(info, target, scope, profile.lang, relevant_entries(entries, selected))
+        task = prompts.translate_task(info, target, scope, profile.lang, relevant_entries(entries, selected), layered)
+        task += revision_lines(revision or [])
         sections = [TRANSLATE_TARGETS[target], prompts.VOCAB_HEADINGS[profile.lang]]
         ref_query = f"{ctx.title} {ctx.author or ''} {ctx.genre.label} {' '.join(sections)}"
         docs, _ = self._documents(ctx, None, ref_query, part=(selected, number, len(parts)))
-        result = self.llm.generate(self.system_prompt, docs, task, {"kind": "translate", "sections": sections})
+        meta = {"kind": "translate", "sections": sections, "layered": layered}
+        result = self.llm.generate(self.system_prompt, docs, task, meta)
         extra = {
             "kind": "translate",
-            "option": translate_option(target, number) + profile.suffix,
+            "option": translate_option(target, number, layered) + profile.suffix,
+            "layered": layered,
             "profile": profile.to_dict(),
             "glossary": {"version": (glossary or {}).get("version"), "count": len(entries)},
             "target": target,
             "part": number,
             "parts": len(parts),
             "part_range": {"from": selected[0].label, "to": selected[-1].label},
+            **_revision_info(revision),
         }
         finished = self._finish(ctx, result, docs, False, extra)
         finished["checks"] = translation_checks(finished["segments"], selected, target, entries)
         return finished
+
+    def _review_paragraphs(self, ctx: WorkContext, result: dict) -> list[Paragraph]:
+        """결과를 만들 때 모델이 받은 원문 범위(번역은 그 부분, 그 밖에는 같은 규칙의 발췌)."""
+        if result.get("kind") == "translate":
+            parts = split_parts(ctx.paragraphs, self.part_chars)
+            number = result.get("part") or 1
+            if isinstance(number, int) and 1 <= number <= len(parts):
+                return parts[number - 1]
+            cited = {i for s in result.get("segments") or [] for c in s.get("citations") or [] for i in c.get("paragraphs") or []}
+            return [p for p in ctx.paragraphs if p.index in cited] or ctx.paragraphs
+        return select_paragraphs(ctx.paragraphs, self.limit, None)[0]
+
+    def review(self, ctx: WorkContext, result: dict) -> dict:
+        """저장된 분석·번역 결과를 원문과 대조해 문제 목록을 만든다(심화 검토)."""
+        kind = result.get("kind")
+        if kind not in KINDS:
+            raise AnalysisRequestError("검토할 수 없는 결과입니다.")
+        if ctx.intro_only:
+            raise AnalysisRequestError("원문이 없어 검토할 수 없습니다. 소개글만 있는 작품은 원문과 대조할 수 없습니다.")
+        paragraphs = self._review_paragraphs(ctx, result)
+        task = KINDS[kind]["label"]
+        if kind == "translate":
+            target = result.get("target") if result.get("target") in TRANSLATE_TARGETS else "easy"
+            task = f"번역·풀이 — {TRANSLATE_TARGETS[target]}" + (" (직역·의역·주석)" if result.get("layered") else "")
+        saved = result.get("profile") or {}
+        profile = ReaderProfile.of(saved.get("audience"), saved.get("lang"))
+        answer = self.llm.complete_json(
+            REVIEW_SYSTEM,
+            review_prompt(ctx.title, task, paragraphs, result, prompts.profile_lines(profile)),
+            REVIEW_SCHEMA,
+            {"kind": "review", "labels": [p.label for p in paragraphs]},
+        )
+        issues = normalize_issues(answer.data, paragraphs)
+        return {
+            "issues": issues,
+            "summary": str(answer.data.get("summary") or "")[:500],
+            "major": sum(1 for i in issues if i["severity"] == "major"),
+            "minor": sum(1 for i in issues if i["severity"] == "minor"),
+            "model": answer.model,
+            "fallback_used": answer.fallback_used,
+            "usage": answer.usage,
+            "mode": self.llm.mode,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
 
     def extract_glossary(self, ctx: WorkContext, target: str, part: int, existing: list[dict]) -> tuple[list[dict], dict]:
         """한 부분에서 번역어를 정해 둘 용어를 뽑는다. 이미 있는 용어는 제외하고 새 용어만 돌려준다."""

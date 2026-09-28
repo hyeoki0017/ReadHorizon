@@ -200,9 +200,16 @@ class ReaderProfile:
         return {"audience": self.audience, "lang": self.lang}
 
 
+# 직역·의역·주석 3층으로 옮길 수 있는 대상(쉬운 말 풀이는 그 자체가 의역이라 제외)
+LAYERED_TARGETS = ("modern", "en", "ko")
+LAYERS_FLAG = "layers"
+
+
 def parse_translate_option(option: str | None) -> tuple[str, int]:
-    """'en', 'en:2'(대상:부분 번호) → (대상, 부분). 모르는 대상은 쉬운 말 풀이, 잘못된 번호는 1부분."""
-    target, _, part = (option or "").partition(":")
+    """'en', 'en:2', 'en:2:layers'(대상:부분 번호:3층) → (대상, 부분).
+    모르는 대상은 쉬운 말 풀이, 잘못된 번호는 1부분. 3층 여부는 is_layered()로 본다."""
+    target, _, rest = (option or "").partition(":")
+    part = rest.partition(":")[0]
     if target not in TRANSLATE_TARGETS:
         target = "easy"
     try:
@@ -212,8 +219,13 @@ def parse_translate_option(option: str | None) -> tuple[str, int]:
     return target, max(1, number)
 
 
-def translate_option(target: str, part: int) -> str:
-    return f"{target}:{part}"
+def is_layered(option: str | None) -> bool:
+    target, _ = parse_translate_option(option)
+    return target in LAYERED_TARGETS and (option or "").split(":")[2:3] == [LAYERS_FLAG]
+
+
+def translate_option(target: str, part: int, layered: bool = False) -> str:
+    return f"{target}:{part}" + (f":{LAYERS_FLAG}" if layered and target in LAYERED_TARGETS else "")
 
 
 def find_genre(category_id: str, genre_id: str) -> tuple[Category, Genre] | None:

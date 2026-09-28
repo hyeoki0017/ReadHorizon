@@ -24,10 +24,12 @@ from .analysis.presets import (
     AUDIENCES,
     EXPLAIN_LANGUAGES,
     KINDS,
+    LAYERED_TARGETS,
     TRANSLATE_TARGETS,
     ReaderProfile,
     categories_payload,
     find_genre,
+    is_layered,
     parse_translate_option,
     translate_option,
 )
@@ -63,6 +65,15 @@ class AnalyzeBody(BaseModel):
     kind: str
     option: str = Field(default="", max_length=40)
     refresh: bool = False
+    # 저장된 결과의 심화 검토 목록을 넣어 다시 쓴다(검토를 먼저 실행해야 함)
+    revise: bool = False
+    audience: str = Field(default="", max_length=20)
+    lang: str = Field(default="ko", max_length=5)
+
+
+class ReviewBody(BaseModel):
+    kind: str
+    option: str = Field(default="", max_length=40)
     audience: str = Field(default="", max_length=20)
     lang: str = Field(default="ko", max_length=5)
 
@@ -244,6 +255,7 @@ def create_app(
             "translate_targets": TRANSLATE_TARGETS,
             "audiences": {k: v["label"] for k, v in AUDIENCES.items()},
             "explain_languages": EXPLAIN_LANGUAGES,
+            "layered_targets": list(LAYERED_TARGETS),
         }
 
     @app.get("/api/bib/search")
@@ -382,28 +394,58 @@ def create_app(
             raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다.")
         return Response(status_code=204)
 
+    def resolve_analysis(work_id: str, kind: str, option: str, audience: str, lang: str):
+        """요청 값 → (독자 설정, 엔진에 줄 옵션, 용어집, 저장 키 옵션)."""
+        if kind not in KINDS:
+            raise HTTPException(status_code=422, detail="알 수 없는 분석 종류입니다.")
+        profile = ReaderProfile.of(audience, lang)
+        base, glossary = "", None
+        if kind == "translate":
+            target, part = parse_translate_option(option)
+            base = translate_option(target, part, is_layered(option))
+            glossary = store.get_glossary(work_id, target)
+        return profile, base, glossary, base + profile.suffix
+
     @app.post("/api/works/{work_id}/analyze")
     def analyze(work_id: str, body: AnalyzeBody, request: Request, ws: str = Depends(workspace_id)) -> dict:
         _, ctx = load_context(ws, work_id)
-        if body.kind not in KINDS:
-            raise HTTPException(status_code=422, detail="알 수 없는 분석 종류입니다.")
-        profile = ReaderProfile.of(body.audience, body.lang)
-        base, glossary = "", None
-        if body.kind == "translate":
-            target, part = parse_translate_option(body.option)
-            base, glossary = translate_option(target, part), store.get_glossary(work_id, target)
-        option = base + profile.suffix
-        if not body.refresh:
+        profile, base, glossary, option = resolve_analysis(work_id, body.kind, body.option, body.audience, body.lang)
+        revision = None
+        if body.revise:
+            stored = store.get_analysis(work_id, body.kind, option)
+            review = (stored or {}).get("review")
+            if not review:
+                raise HTTPException(status_code=422, detail="먼저 '원문과 대조해 검토'를 실행해 주세요.")
+            revision = review.get("issues") or []
+            if not revision:
+                raise HTTPException(status_code=422, detail="검토에서 고칠 문제를 찾지 못했습니다.")
+        elif not body.refresh:
             cached = store.get_analysis(work_id, body.kind, option)
             if cached is not None:
                 return {**cached, "cached": True}
         enforce(llm_limiter, request)
-        result = engine.analyze(ctx, body.kind, base, profile, glossary)
+        result = engine.analyze(ctx, body.kind, base, profile, glossary, revision)
         try:
             store.save_analysis(work_id, body.kind, result["option"], result)
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=404, detail="분석 중에 작품이 삭제되었습니다.") from None
         return {**result, "cached": False}
+
+    @app.post("/api/works/{work_id}/review")
+    def review(work_id: str, body: ReviewBody, request: Request, ws: str = Depends(workspace_id)) -> dict:
+        """저장된 분석·번역을 원문과 대조해 문제 목록을 붙인다(심화 검토). 결과 본문은 바꾸지 않는다."""
+        _, ctx = load_context(ws, work_id)
+        _, _, _, option = resolve_analysis(work_id, body.kind, body.option, body.audience, body.lang)
+        stored = store.get_analysis(work_id, body.kind, option)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="검토할 결과가 없습니다. 먼저 분석을 실행해 주세요.")
+        enforce(llm_limiter, request)
+        stored["review"] = engine.review(ctx, stored)
+        try:
+            store.save_analysis(work_id, body.kind, option, stored)
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=404, detail="검토 중에 작품이 삭제되었습니다.") from None
+        return {**stored, "cached": True}
 
     @app.post("/api/works/{work_id}/ask")
     def ask(work_id: str, body: AskBody, request: Request, ws: str = Depends(workspace_id)) -> dict:
