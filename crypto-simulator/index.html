@@ -1,0 +1,1344 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>암호학 실험실</title>
+<meta name="description" content="대학생을 위한 암호학 시뮬레이터: 고전 암호, 모듈러 산술, RSA, 디피–헬만, AES, 블록 운용 모드, SHA-256, 타원곡선">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 레이아웃: 왼쪽 실험 목록(좁은 화면에서는 위쪽 가로 목록) + 오른쪽 실험대. 실험대는 '개념 → 조작 → 관찰 → 생각해 볼 문제' 순서. */
+:root{
+  --bg:#edf0f4;          /* 실험실 바닥: 푸른 기가 도는 회색 */
+  --surface:#ffffff;
+  --sunken:#f5f7fa;
+  --ink:#141c28;
+  --muted:#5a6577;
+  --line:#d3d9e2;
+  --accent:#0d6e66;      /* 실험 노트의 청록 잉크 */
+  --accent-soft:#d8eeeb;
+  --hot:#c2410c;         /* 바뀐 비트·공격자 표시 */
+  --hot-soft:#fbe3d6;
+  --ok:#15803d;
+  --bad:#b91c1c;
+  --font-body:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --step--1:.8125rem; --step-0:.9375rem; --step-1:1.125rem; --step-2:1.5rem; --step-3:2rem;
+  --radius:6px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e131a; --surface:#151c26; --sunken:#111821; --ink:#e2e8f0; --muted:#94a0b2; --line:#283241;
+    --accent:#3cc0ae; --accent-soft:#12302e; --hot:#ff8a4c; --hot-soft:#3a2219; --ok:#4ade80; --bad:#f87171;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e131a; --surface:#151c26; --sunken:#111821; --ink:#e2e8f0; --muted:#94a0b2; --line:#283241;
+  --accent:#3cc0ae; --accent-soft:#12302e; --hot:#ff8a4c; --hot-soft:#3a2219; --ok:#4ade80; --bad:#f87171;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:var(--step-0);line-height:1.6;margin:0;word-break:keep-all;overflow-wrap:anywhere}
+h1,h2,h3{text-wrap:balance;line-height:1.25;margin:0}
+p{margin:0}
+code,.mono{font-family:var(--font-mono);font-size:.92em}
+a{color:var(--accent)}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100%;max-width:1320px;margin:0 auto}
+.side{position:sticky;top:env(safe-area-inset-top,0px);align-self:start;height:100vh;padding:28px 16px 24px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:20px}
+.brand{display:flex;flex-direction:column;gap:2px;padding-inline:8px}
+.brand b{font-size:var(--step-1);letter-spacing:-.01em}
+.brand span{font-size:var(--step--1);color:var(--muted)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav button{all:unset;cursor:pointer;display:grid;grid-template-columns:28px 1fr;align-items:baseline;padding:8px;border-radius:var(--radius);color:var(--muted);font-size:var(--step-0)}
+.nav button .no{font-family:var(--font-mono);font-size:var(--step--1);color:var(--muted)}
+.nav button:hover{background:var(--surface);color:var(--ink)}
+.nav button[aria-current="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.nav button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.side .foot{margin-top:auto;font-size:var(--step--1);color:var(--muted);padding-inline:8px}
+main{padding-block:32px 64px;padding-inline:40px;min-width:0}
+.mod{display:flex;flex-direction:column;gap:22px;max-width:1000px}
+.mod-head{display:flex;flex-direction:column;gap:8px}
+.eyebrow{font-family:var(--font-mono);font-size:var(--step--1);letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.mod-head h1{font-size:var(--step-3);font-weight:700;letter-spacing:-.02em}
+.lead{color:var(--muted);max-width:68ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel h2{font-size:var(--step-1);font-weight:600}
+.panel h2 small{font-weight:400;color:var(--muted);font-size:var(--step--1);margin-left:6px}
+.concept{background:var(--sunken)}
+.concept summary{cursor:pointer;font-weight:600}
+.concept[open] summary{margin-bottom:10px}
+.concept p+p,.concept ul{margin-top:8px}
+.concept ul{padding-left:1.2em;margin-bottom:0}
+.formula{font-family:var(--font-mono);background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:8px 12px;overflow-x:auto;white-space:pre;font-size:var(--step--1)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:4px;min-width:0}
+.field label{font-size:var(--step--1);color:var(--muted);letter-spacing:.02em}
+.field.grow{flex:1 1 220px}
+input[type=text],input[type=number],select,textarea{font:inherit;color:var(--ink);background:var(--sunken);border:1px solid var(--line);border-radius:4px;padding:7px 10px;min-width:0;width:100%}
+input.mono,textarea.mono{font-family:var(--font-mono);font-size:var(--step--1)}
+textarea{resize:vertical;min-height:90px;line-height:1.5}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+input[type=range]{accent-color:var(--accent);width:100%}
+input[type=checkbox]{accent-color:var(--accent)}
+.btn{font:inherit;font-size:var(--step--1);font-weight:600;cursor:pointer;border-radius:4px;padding:8px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--surface)}
+.btn.ghost{background:transparent;color:var(--accent)}
+.btn:hover{filter:brightness(1.08)}
+.btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.btn:disabled{opacity:.5;cursor:wait}
+.out{font-family:var(--font-mono);font-size:var(--step--1);background:var(--sunken);border:1px solid var(--line);border-radius:4px;padding:10px 12px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;min-height:2.6em}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;font-size:var(--step--1);align-items:baseline}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--font-mono);word-break:break-all}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px;max-height:360px}
+table{border-collapse:collapse;width:100%;font-size:var(--step--1);font-variant-numeric:tabular-nums}
+th,td{padding:5px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap;font-family:var(--font-mono)}
+th{position:sticky;top:0;background:var(--sunken);color:var(--muted);font-family:var(--font-body);font-weight:600;text-align:right}
+tr.hl td{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:var(--step--1);padding:2px 10px;border-radius:999px;border:1px solid var(--line);background:var(--sunken)}
+.pill.ok{color:var(--ok);border-color:currentColor}
+.pill.bad{color:var(--bad);border-color:currentColor}
+.pill.hot{color:var(--hot);border-color:currentColor}
+.note{font-size:var(--step--1);color:var(--muted)}
+.qs{counter-reset:q;list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.qs li{counter-increment:q;display:grid;grid-template-columns:2.2em 1fr;font-size:var(--step-0)}
+.qs li::before{content:"Q" counter(q);font-family:var(--font-mono);color:var(--accent);font-size:var(--step--1);padding-top:2px}
+/* 빈도 막대 */
+.freq{display:grid;grid-template-columns:repeat(26,minmax(0,1fr));gap:2px;align-items:end;height:150px;padding-top:6px}
+.freq .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:2px;min-width:0}
+.freq .bars{display:flex;align-items:flex-end;gap:1px;height:100%;width:100%;justify-content:center}
+.freq .b{width:42%;background:var(--accent);border-radius:1px 1px 0 0}
+.freq .b.exp{background:var(--line)}
+.freq .lt{font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.legend{display:flex;gap:14px;font-size:var(--step--1);color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+/* AES 상태 행렬 */
+.states{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.state{display:flex;flex-direction:column;gap:6px}
+.state .cap{font-size:var(--step--1);color:var(--muted)}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;font-family:var(--font-mono);font-size:var(--step--1)}
+.grid4 span{background:var(--sunken);border:1px solid var(--line);text-align:center;padding:4px 0;border-radius:2px}
+.grid4 span.chg{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
+/* 막대 그래프(라운드별 비트 차이) */
+.rbars{display:grid;grid-template-columns:repeat(11,minmax(0,1fr));gap:6px;align-items:end;height:150px;border-bottom:1px solid var(--line);position:relative}
+.rbars .rb{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:2px;font-family:var(--font-mono);font-size:10px;color:var(--muted)}
+.rbars .rb i{display:block;width:70%;background:var(--hot);border-radius:2px 2px 0 0}
+.rbars .half{position:absolute;left:0;right:0;border-top:1px dashed var(--muted);opacity:.6}
+.rlabels{display:grid;grid-template-columns:repeat(11,minmax(0,1fr));gap:6px;font-family:var(--font-mono);font-size:10px;color:var(--muted);text-align:center}
+/* 비트 격자 */
+.bitgrid{display:grid;grid-template-columns:repeat(32,minmax(0,1fr));gap:1px;max-width:520px}
+.bitgrid i{aspect-ratio:1;background:var(--sunken);border:1px solid var(--line);border-radius:1px}
+.bitgrid i.d{background:var(--hot);border-color:var(--hot)}
+/* 이미지 */
+.imgs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:14px}
+.imgs figure{margin:0;display:flex;flex-direction:column;gap:6px}
+.imgs canvas{width:100%;max-width:100%;aspect-ratio:1;image-rendering:pixelated;border:1px solid var(--line);border-radius:4px;background:var(--sunken)}
+.imgs figcaption{font-size:var(--step--1);color:var(--muted)}
+.imgs figcaption b{color:var(--ink)}
+/* 디피–헬만 3자 */
+.parties{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
+.party{border:1px solid var(--line);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--sunken)}
+.party h3{font-size:var(--step-0)}
+.party.eve{border-color:var(--hot);background:var(--hot-soft)}
+.party.eve h3{color:var(--hot)}
+/* 타원곡선 */
+.ecwrap{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px}
+.ecwrap canvas{width:100%;aspect-ratio:1;max-width:100%;border:1px solid var(--line);border-radius:4px;background:var(--sunken);cursor:crosshair;touch-action:manipulation}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chips span{font-family:var(--font-mono);font-size:11px;padding:2px 6px;border-radius:3px;background:var(--sunken);border:1px solid var(--line)}
+.chips span.g{background:var(--accent-soft);border-color:var(--accent)}
+@media (max-width:860px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .side{position:sticky;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:12px 16px;gap:8px;background:var(--bg);z-index:5}
+  .brand{flex-direction:row;align-items:baseline;gap:10px;padding:0}
+  .nav{flex-direction:row;overflow-x:auto;gap:4px;scrollbar-width:none;margin-inline:-16px;padding-inline:16px}
+  .nav button{grid-template-columns:auto auto;gap:6px;white-space:nowrap;padding:6px 10px}
+  .nav button[aria-current="true"]{box-shadow:inset 0 -2px 0 var(--accent)}
+  .side .foot{display:none}
+  main{padding-block:20px 48px;padding-inline:16px}
+  .ecwrap{grid-template-columns:minmax(0,1fr)}
+  .mod-head h1{font-size:var(--step-2)}
+}
+@media (prefers-reduced-motion:no-preference){
+  .freq .b,.rbars .rb i{transition:height .25s ease}
+}
+</style>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand"><b>암호학 실험실</b><span>Cryptography Lab</span></div>
+    <nav class="nav" id="nav" aria-label="실험 목록"></nav>
+    <p class="foot">모든 계산은 이 브라우저 안에서만 이루어집니다. 입력값은 어디에도 전송되지 않습니다.<br><br>교육용 구현입니다. 실제 서비스에는 검증된 라이브러리를 쓰세요.</p>
+  </aside>
+  <main id="main">
+
+<!-- ───────────── 1. 고전 암호 ───────────── -->
+<section class="mod" data-mod="classic" data-title="고전 암호" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 1 · 치환 암호와 통계</span>
+    <h1>카이사르와 비즈네르, 그리고 빈도 분석</h1>
+    <p class="lead">글자를 바꿔도 언어의 통계는 남습니다. 암호문 글자 빈도를 영어의 기대 빈도와 비교해, 키를 모른 채로 평문을 되찾아 보세요.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <p>카이사르 암호는 모든 글자를 같은 거리 k만큼 민다(키 공간 26). 비즈네르 암호는 키 글자마다 다른 거리를 써서 단일 빈도 분포를 평평하게 만든다.</p>
+    <div class="formula">카이사르  C = (P + k) mod 26
+비즈네르  Cᵢ = (Pᵢ + K_(i mod m)) mod 26
+카이제곱  χ² = Σ (관측ᵢ − 기대ᵢ)² / 기대ᵢ      ← 작을수록 영어에 가깝다
+일치지수  IC = Σ nᵢ(nᵢ−1) / (N(N−1))          ← 영어 ≈ 0.066, 무작위 ≈ 0.038</div>
+    <p>비즈네르 해독은 두 단계다. ① 키 길이 m 후보마다 m개 열로 나눠 평균 IC를 구하면, 올바른 m에서 IC가 영어 수준으로 뛴다. ② 각 열은 카이사르 암호이므로 χ²가 가장 작은 이동량이 그 열의 키 글자다.</p>
+  </details>
+
+  <div class="panel">
+    <h2>암호화</h2>
+    <div class="row">
+      <div class="field"><label for="cl-alg">알고리즘</label>
+        <select id="cl-alg"><option value="caesar">카이사르</option><option value="vig" selected>비즈네르</option></select></div>
+      <div class="field" id="cl-shift-f" hidden><label for="cl-shift">이동량 k = <b id="cl-shift-v">3</b></label><input type="range" id="cl-shift" min="0" max="25" value="3"></div>
+      <div class="field" id="cl-key-f"><label for="cl-key">키(영문)</label><input type="text" id="cl-key" class="mono" value="LEMON" style="width:160px"></div>
+    </div>
+    <div class="cols">
+      <div class="field"><label for="cl-pt">평문</label><textarea id="cl-pt" rows="7"></textarea></div>
+      <div class="field"><label for="cl-ct">암호문 (직접 붙여 넣어 해독해도 됩니다)</label><textarea id="cl-ct" class="mono" rows="7"></textarea></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>암호문 글자 빈도 <small>A–Z, 퍼센트</small></h2>
+    <div class="freq" id="cl-freq"></div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>암호문 관측 빈도</span><span><i style="background:var(--line)"></i>영어 기대 빈도</span><span id="cl-ic"></span></div>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>카이사르 전수 조사 <small>χ² 낮은 순</small></h2>
+      <div class="tbl-wrap"><table id="cl-caesar"></table></div>
+    </div>
+    <div class="panel">
+      <h2>비즈네르 키 길이 추정 <small>열 평균 IC</small></h2>
+      <div class="tbl-wrap"><table id="cl-ioc"></table></div>
+      <dl class="kv" id="cl-vres"></dl>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>자동 해독 결과</h2>
+    <div class="out" id="cl-crack"></div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>평문을 두세 문장으로 줄이면 비즈네르 자동 해독이 언제부터 틀리나요? 필요한 암호문 길이와 키 길이의 관계를 추정해 보세요.</li>
+      <li>키 길이 표에서 정답 m의 배수(2m, 3m…)도 IC가 높게 나오는 이유는 무엇인가요?</li>
+      <li>키가 평문만큼 길고 한 번만 쓰이면(일회용 패드) 이 공격이 왜 완전히 무력해지나요? 섀넌의 완전 비밀성과 연결해 설명하세요.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 2. 모듈러 산술 ───────────── -->
+<section class="mod" data-mod="modular" data-title="모듈러 산술" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 2 · 공개키 암호의 연산 도구</span>
+    <h1>확장 유클리드 호제법과 빠른 거듭제곱</h1>
+    <p class="lead">RSA·디피–헬만·타원곡선은 모두 두 연산 위에 서 있습니다. 모듈러 역원을 구하는 확장 유클리드, 그리고 지수의 비트 수만큼만 곱하는 제곱-곱셈법입니다.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">베주 항등식   a·s + m·t = gcd(a, m)
+gcd = 1 이면  a⁻¹ ≡ s (mod m)
+제곱-곱셈     지수 e를 2진수로 읽으며 비트마다 acc ← acc²,  비트가 1이면 acc ← acc·b
+비용          곱셈 약 2·log₂e 회   (단순 반복은 e−1 회)</div>
+    <p>모든 값은 임의 정밀도 정수(BigInt)로 계산하므로 수백 자리 수도 넣을 수 있습니다.</p>
+  </details>
+  <div class="cols">
+    <div class="panel">
+      <h2>확장 유클리드 · 모듈러 역원</h2>
+      <div class="row">
+        <div class="field grow"><label for="md-a">a</label><input type="text" id="md-a" class="mono" value="17"></div>
+        <div class="field grow"><label for="md-m">m</label><input type="text" id="md-m" class="mono" value="3120"></div>
+      </div>
+      <div class="tbl-wrap"><table id="md-eg"></table></div>
+      <div class="out" id="md-egres"></div>
+    </div>
+    <div class="panel">
+      <h2>제곱-곱셈법 <small>b<sup>e</sup> mod m</small></h2>
+      <div class="row">
+        <div class="field grow"><label for="mp-b">밑 b</label><input type="text" id="mp-b" class="mono" value="65"></div>
+        <div class="field grow"><label for="mp-e">지수 e</label><input type="text" id="mp-e" class="mono" value="17"></div>
+        <div class="field grow"><label for="mp-m">법 m</label><input type="text" id="mp-m" class="mono" value="3233"></div>
+      </div>
+      <div class="tbl-wrap"><table id="mp-tbl"></table></div>
+      <div class="out" id="mp-res"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>a = 12, m = 3120으로 바꾸면 역원이 존재하지 않습니다. RSA에서 공개 지수 e를 고를 때 이것이 왜 중요한가요?</li>
+      <li>e = 65537 = 2¹⁶ + 1일 때 제곱-곱셈법의 곱셈 횟수는 몇 번인가요? 이 값이 공개 지수로 널리 쓰이는 이유를 설명하세요.</li>
+      <li>제곱-곱셈법은 비트가 1일 때만 곱셈을 한 번 더 합니다. 실행 시간을 측정하는 공격자는 무엇을 알아낼 수 있을까요? (힌트: 부채널 공격, 몽고메리 사다리)</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 3. RSA ───────────── -->
+<section class="mod" data-mod="rsa" data-title="RSA" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 3 · 인수분해의 어려움</span>
+    <h1>RSA 키 생성부터 공격까지</h1>
+    <p class="lead">작은 소수로 키를 만들고, 암호화·복호화·CRT 가속을 확인한 뒤, 같은 키를 직접 인수분해해 깨 봅니다. 비트 수를 늘리며 공격 시간이 어떻게 변하는지 관찰하세요.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">n = p·q,   φ(n) = (p−1)(q−1),   gcd(e, φ) = 1,   d ≡ e⁻¹ (mod φ)
+암호화  c = mᵉ mod n        복호화  m = cᵈ mod n
+CRT    m_p = c^(d mod p−1) mod p,  m_q = c^(d mod q−1) mod q
+       m = m_q + q·((m_p − m_q)·q⁻¹ mod p)        ← 약 4배 빠르다</div>
+    <p>이 실험의 RSA는 패딩이 없는 '교과서 RSA'입니다. 결정적이고 곱셈 준동형이라 그대로 쓰면 안전하지 않습니다. 실제로는 OAEP(암호화)·PSS(서명) 패딩과 2048비트 이상의 n을 씁니다.</p>
+  </details>
+
+  <div class="panel">
+    <h2>키 생성</h2>
+    <div class="row">
+      <div class="field"><label for="rsa-bits">소수 크기</label>
+        <select id="rsa-bits"><option value="8">8비트</option><option value="12">12비트</option><option value="16" selected>16비트</option><option value="24">24비트</option><option value="32">32비트</option><option value="40">40비트</option></select></div>
+      <button class="btn" id="rsa-gen">무작위 소수로 생성</button>
+    </div>
+    <div class="row">
+      <div class="field grow"><label for="rsa-p">p</label><input type="text" id="rsa-p" class="mono" value="61"></div>
+      <div class="field grow"><label for="rsa-q">q</label><input type="text" id="rsa-q" class="mono" value="53"></div>
+      <div class="field grow"><label for="rsa-e">e</label><input type="text" id="rsa-e" class="mono" value="17"></div>
+      <button class="btn ghost" id="rsa-calc">직접 입력한 값으로 계산</button>
+    </div>
+    <dl class="kv" id="rsa-key"></dl>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>정수 하나 암호화 <small>CRT 복호 비교</small></h2>
+      <div class="row"><div class="field grow"><label for="rsa-m">평문 m (0 ≤ m &lt; n)</label><input type="text" id="rsa-m" class="mono" value="65"></div></div>
+      <dl class="kv" id="rsa-int"></dl>
+    </div>
+    <div class="panel">
+      <h2>곱셈 준동형 <small>교과서 RSA의 약점</small></h2>
+      <div class="row">
+        <div class="field grow"><label for="rsa-m1">m₁</label><input type="text" id="rsa-m1" class="mono" value="7"></div>
+        <div class="field grow"><label for="rsa-m2">m₂</label><input type="text" id="rsa-m2" class="mono" value="9"></div>
+      </div>
+      <dl class="kv" id="rsa-hom"></dl>
+      <p class="note">공격자는 d 없이 암호문만 곱해 m₁·m₂의 암호문을 만들 수 있습니다. 패딩이 이 구조를 깨뜨립니다.</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>문장 암호화 <small>UTF-8 바이트마다 따로 암호화</small></h2>
+    <div class="field"><label for="rsa-text">평문</label><input type="text" id="rsa-text" value="ATTACK AT DAWN 새벽에 공격"></div>
+    <div class="out" id="rsa-textout"></div>
+    <p class="note">같은 바이트는 늘 같은 암호문이 됩니다(A, T, 공백을 찾아보세요). 결정적 암호화는 결국 거대한 치환 암호이고, 실험 1의 빈도 분석이 그대로 통합니다.</p>
+  </div>
+
+  <div class="panel">
+    <h2>공격: n을 인수분해해 d 복원하기</h2>
+    <div class="row">
+      <button class="btn" id="rsa-trial">시행 나눗셈</button>
+      <button class="btn ghost" id="rsa-rho">폴라드 ρ</button>
+    </div>
+    <div class="out" id="rsa-atk">버튼을 눌러 현재 n을 인수분해해 보세요.</div>
+    <p class="note">시행 나눗셈은 약 √n ≈ 2^(비트/2)번, 폴라드 ρ는 약 n^(1/4)번 걸립니다. 2048비트 n에는 둘 다, 그리고 가장 빠른 알려진 방법(일반 수체 체)도 현실적인 시간 안에 닿지 못합니다.</p>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>p = q로 두면 어떤 일이 생기나요? φ(n)을 다시 계산해 보고 왜 p ≠ q여야 하는지 설명하세요.</li>
+      <li>e = 3이고 m³ &lt; n이면, 공격자는 d 없이 m을 어떻게 구할 수 있나요?</li>
+      <li>소수 크기를 16 → 24 → 32 → 40비트로 늘리며 폴라드 ρ 반복 횟수를 기록하고, n^(1/4) 예측과 비교해 보세요.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 4. 디피–헬만 ───────────── -->
+<section class="mod" data-mod="dh" data-title="디피–헬만" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 4 · 이산로그 문제</span>
+    <h1>디피–헬만 키 교환과 중간자 공격</h1>
+    <p class="lead">공개 채널에서 비밀 없이 같은 키를 만드는 과정입니다. 도청자 이브의 입장에서 이산로그를 풀어 보고, 인증이 없을 때 끼어드는 중간자 공격도 켜 보세요.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">공개      소수 p, 생성원 g
+앨리스    a 비밀,  A = gᵃ mod p 전송
+밥        b 비밀,  B = gᵇ mod p 전송
+공유 키   K = Bᵃ = Aᵇ = gᵃᵇ mod p
+이산로그  A, g, p로부터 a 찾기 — 전수 조사 O(p),  아기걸음-거인걸음 O(√p)</div>
+    <p>안전소수 p = 2q + 1 (q도 소수)을 쓰면 생성원 판정이 쉽고, 작은 부분군 공격을 피할 수 있습니다. 실제로는 2048비트 이상 p 또는 타원곡선(X25519)을 씁니다.</p>
+  </details>
+  <div class="panel">
+    <h2>공개 매개변수</h2>
+    <div class="row">
+      <div class="field"><label for="dh-bits">안전소수 크기</label>
+        <select id="dh-bits"><option value="12">12비트</option><option value="16">16비트</option><option value="24" selected>24비트</option><option value="32">32비트</option></select></div>
+      <button class="btn" id="dh-gen">p, g, 비밀값 새로 만들기</button>
+    </div>
+    <div class="row">
+      <div class="field grow"><label for="dh-p">p</label><input type="text" id="dh-p" class="mono" value="23"></div>
+      <div class="field grow"><label for="dh-g">g</label><input type="text" id="dh-g" class="mono" value="5"></div>
+      <div class="field grow"><label for="dh-a">앨리스 비밀 a</label><input type="text" id="dh-a" class="mono" value="6"></div>
+      <div class="field grow"><label for="dh-b">밥 비밀 b</label><input type="text" id="dh-b" class="mono" value="15"></div>
+    </div>
+    <label class="note" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="dh-mitm"> 이브가 중간에서 A, B를 가로채 자기 값으로 바꿔치기(중간자 공격)</label>
+    <div class="field" id="dh-e-f" hidden style="max-width:260px"><label for="dh-e">이브 비밀 e</label><input type="text" id="dh-e" class="mono" value="11"></div>
+    <p class="note" id="dh-warn"></p>
+  </div>
+  <div class="parties" id="dh-parties"></div>
+  <div class="panel">
+    <h2>이브의 공격: A에서 a 찾기</h2>
+    <div class="row">
+      <button class="btn" id="dh-brute">전수 조사</button>
+      <button class="btn ghost" id="dh-bsgs">아기걸음-거인걸음</button>
+    </div>
+    <div class="out" id="dh-atk">p를 키워 가며 두 방법의 연산 횟수를 비교해 보세요. 전수 조사는 300만 번에서 멈춥니다.</div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>중간자 공격을 켜면 앨리스와 밥은 각자 '키 교환 성공'이라고 믿습니다. 무엇을 추가하면(서명, 인증서 등) 이 공격을 막을 수 있나요?</li>
+      <li>g의 위수가 작으면(예: g = p − 1) 공유 키가 몇 가지 값만 가질 수 있습니다. 직접 넣어 확인해 보세요.</li>
+      <li>아기걸음-거인걸음은 시간을 √p로 줄이는 대신 무엇을 대가로 치르나요?</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 5. AES ───────────── -->
+<section class="mod" data-mod="aes" data-title="AES-128 라운드" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 5 · 치환-순열 네트워크</span>
+    <h1>AES-128 라운드를 한 단계씩</h1>
+    <p class="lead">16바이트 상태 행렬이 10라운드 동안 어떻게 섞이는지 봅니다. 이전 단계와 달라진 바이트가 강조됩니다. 아래에서 평문 1비트를 뒤집어 눈사태 효과도 측정해 보세요.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">AddRoundKey(0)
+라운드 1–9   SubBytes → ShiftRows → MixColumns → AddRoundKey
+라운드 10    SubBytes → ShiftRows → AddRoundKey           (MixColumns 없음)
+SubBytes    GF(2⁸) 역원 + 아핀 변환  → 비선형성(혼돈, confusion)
+ShiftRows   r행을 왼쪽으로 r칸        → 열 사이 확산
+MixColumns  GF(2⁸) 위 4×4 행렬 곱    → 열 안 확산(diffusion)</div>
+    <p>상태 행렬은 열 우선으로 채웁니다: 입력 바이트 i는 (행 i mod 4, 열 ⌊i/4⌋). 이 구현은 S-box를 표로 적지 않고 GF(2⁸) 역원과 아핀 변환으로 직접 계산합니다.</p>
+  </details>
+  <div class="panel">
+    <h2>입력 <small>16진수 32자</small></h2>
+    <div class="row">
+      <div class="field grow"><label for="aes-key">키</label><input type="text" id="aes-key" class="mono" value="000102030405060708090a0b0c0d0e0f"></div>
+      <div class="field grow"><label for="aes-pt">평문 블록</label><input type="text" id="aes-pt" class="mono" value="00112233445566778899aabbccddeeff"></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="aes-fips">FIPS-197 부록 C.1 예제</button>
+      <button class="btn ghost" id="aes-rand">무작위 키·평문</button>
+      <span id="aes-check"></span>
+    </div>
+    <dl class="kv" id="aes-res"></dl>
+  </div>
+  <div class="panel">
+    <h2>라운드 <span id="aes-rv" class="mono">1</span> <small>슬라이더로 0–10 라운드 이동</small></h2>
+    <input type="range" id="aes-round" min="0" max="10" value="1" aria-label="라운드">
+    <div class="states" id="aes-states"></div>
+    <div class="field"><label>이 라운드의 라운드 키</label><div class="grid4" id="aes-rk" style="max-width:200px"></div></div>
+  </div>
+  <div class="panel">
+    <h2>눈사태 효과 <small>128비트 중 달라진 비트 수, 라운드별</small></h2>
+    <div class="row"><div class="field" style="flex:1 1 260px"><label for="aes-flip">평문에서 뒤집을 비트 위치 = <b id="aes-flipv">0</b></label><input type="range" id="aes-flip" min="0" max="127" value="0"></div></div>
+    <div class="rbars" id="aes-av"></div>
+    <div class="rlabels"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+    <p class="note">점선은 무작위 기대값 64비트입니다. 두 라운드면 대략 절반이 바뀝니다(완전 확산).</p>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>마지막 라운드에 MixColumns가 없는 이유는 무엇인가요? (힌트: 복호 구조의 대칭성, 안전성에는 영향 없음)</li>
+      <li>SubBytes를 항등 함수로 바꾸면 AES 전체가 GF(2) 위 아핀 함수가 됩니다. 이때 평문-암호문 쌍 몇 개로 키를 구할 수 있을까요?</li>
+      <li>키의 비트 하나를 바꿨을 때도 눈사태 효과가 나타나는지 예측하고, 키를 고쳐 확인해 보세요.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 6. 블록 운용 모드 ───────────── -->
+<section class="mod" data-mod="modes" data-title="블록 운용 모드" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 6 · 블록 암호를 긴 데이터에</span>
+    <h1>ECB가 이미지를 숨기지 못하는 이유</h1>
+    <p class="lead">같은 그림을 AES-128로 ECB·CBC·CTR 모드에서 암호화합니다. 회색조 픽셀 하나가 1바이트이므로, 가로 16픽셀이 한 블록입니다.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">ECB   Cᵢ = E_K(Pᵢ)                       같은 블록 → 같은 암호문
+CBC   Cᵢ = E_K(Pᵢ ⊕ Cᵢ₋₁),  C₀ = IV        IV는 예측 불가능해야 함
+CTR   Cᵢ = Pᵢ ⊕ E_K(nonce ‖ i)            nonce 재사용 금지, 병렬 처리 가능</div>
+    <p>실무에서는 기밀성과 무결성을 함께 주는 인증 암호(AES-GCM, ChaCha20-Poly1305)를 씁니다.</p>
+  </details>
+  <div class="panel">
+    <div class="row">
+      <button class="btn" id="md-run">새 키로 다시 암호화</button>
+      <div class="field"><label for="md-file">내 이미지 넣기(이 브라우저 안에서만 처리)</label><input type="file" id="md-file" accept="image/*"></div>
+      <label class="note" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="md-reuse"> CTR에서 두 번째 그림에 같은 nonce 재사용</label>
+    </div>
+    <div class="imgs">
+      <figure><canvas id="cv-orig" width="160" height="160"></canvas><figcaption><b>원본</b> · 160×160, 1,600블록</figcaption></figure>
+      <figure><canvas id="cv-ecb" width="160" height="160"></canvas><figcaption><b>ECB</b> · <span id="ecb-dup"></span></figcaption></figure>
+      <figure><canvas id="cv-cbc" width="160" height="160"></canvas><figcaption><b>CBC</b> · 무작위 IV</figcaption></figure>
+      <figure><canvas id="cv-ctr" width="160" height="160"></canvas><figcaption><b>CTR</b> · 무작위 nonce</figcaption></figure>
+    </div>
+    <div class="imgs" id="md-reuse-box" hidden>
+      <figure><canvas id="cv-orig2" width="160" height="160"></canvas><figcaption><b>두 번째 평문</b></figcaption></figure>
+      <figure><canvas id="cv-ctr2" width="160" height="160"></canvas><figcaption><b>CTR</b> · 같은 nonce</figcaption></figure>
+      <figure><canvas id="cv-xor" width="160" height="160"></canvas><figcaption><b>C₁ ⊕ C₂</b> = P₁ ⊕ P₂ · 키 없이 보이는 것</figcaption></figure>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>ECB 그림에서 윤곽이 보이는 영역과 보이지 않는 영역은 각각 어떤 픽셀 패턴인가요? 사진처럼 잡음이 많은 이미지를 넣으면 어떻게 되나요?</li>
+      <li>CBC 암호문 한 블록에서 비트 하나가 깨지면 복호 시 몇 블록이 영향을 받나요? CTR은요?</li>
+      <li>nonce 재사용 실험에서 C₁ ⊕ C₂만으로 두 평문의 윤곽이 보입니다. 같은 일이 WEP·스트림 암호 사고에서 어떻게 일어났는지 조사해 보세요.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 7. 해시 ───────────── -->
+<section class="mod" data-mod="hash" data-title="해시 함수" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 7 · 충돌 저항성</span>
+    <h1>SHA-256 눈사태와 생일 공격</h1>
+    <p class="lead">글자 하나만 바꿔도 다이제스트 비트의 절반쯤이 바뀝니다. 그리고 출력을 n비트로 자르면 약 2<sup>n/2</sup>번 만에 충돌이 나는 생일 역설을 직접 재현합니다.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">역상 저항성       h가 주어졌을 때 H(x) = h 찾기      ≈ 2ⁿ
+제2역상 저항성    x가 주어졌을 때 H(x') = H(x) 찾기  ≈ 2ⁿ
+충돌 저항성       H(x) = H(x')인 아무 쌍 찾기         ≈ √(π/2)·2^(n/2) ≈ 1.25·2^(n/2)</div>
+    <p>SHA-256은 메르클–담고르 구조로 512비트 블록을 64라운드 압축 함수에 넣습니다. 이 페이지의 SHA-256은 직접 구현했고, 아래 'abc' 시험 벡터로 검증됩니다.</p>
+  </details>
+  <div class="panel">
+    <h2>눈사태 효과</h2>
+    <div class="cols">
+      <div class="field"><label for="hs-a">메시지 1</label><input type="text" id="hs-a" value="암호학 실험실"></div>
+      <div class="field"><label for="hs-b">메시지 2</label><input type="text" id="hs-b" value="암호학 실험싫"></div>
+    </div>
+    <dl class="kv" id="hs-res"></dl>
+    <div class="bitgrid" id="hs-grid" aria-label="달라진 비트 256칸"></div>
+    <p class="note"><span id="hs-test"></span></p>
+  </div>
+  <div class="panel">
+    <h2>생일 공격 <small>SHA-256 앞 n비트만 사용</small></h2>
+    <div class="row">
+      <div class="field" style="flex:1 1 240px"><label for="bd-n">잘라 쓸 비트 수 n = <b id="bd-nv">24</b></label><input type="range" id="bd-n" min="8" max="36" value="24"></div>
+      <button class="btn" id="bd-run">충돌 찾기</button>
+      <button class="btn ghost" id="bd-many">20회 반복 평균</button>
+    </div>
+    <div class="out" id="bd-out">기대 시도 횟수 ≈ 1.25·2^(n/2). 버튼을 눌러 실측값과 비교하세요.</div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>n을 4비트 늘릴 때 생일 공격 시도 횟수는 몇 배가 되나요? 역상 공격은요?</li>
+      <li>128비트 보안 수준을 원할 때 해시 출력이 256비트여야 하는 이유를 생일 공격으로 설명하세요.</li>
+      <li>비밀번호 저장에 SHA-256을 한 번만 쓰면 안 되는 이유는 무엇인가요? (솔트, 느린 해시: Argon2·scrypt)</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ───────────── 8. 타원곡선 ───────────── -->
+<section class="mod" data-mod="ecc" data-title="타원곡선" hidden>
+  <header class="mod-head">
+    <span class="eyebrow">실험 8 · 유한체 위의 군</span>
+    <h1>타원곡선 점 덧셈과 스칼라 곱</h1>
+    <p class="lead">유한체 F<sub>p</sub> 위 곡선의 점들은 덧셈에 대해 군을 이룹니다. 그림에서 점 두 개를 눌러 P와 Q로 고르면 P + Q를 계산 과정과 함께 보여 줍니다.</p>
+  </header>
+  <details class="panel concept" open>
+    <summary>핵심 개념</summary>
+    <div class="formula">곡선      y² ≡ x³ + a·x + b (mod p),   4a³ + 27b² ≢ 0
+P ≠ Q     λ = (y₂ − y₁)·(x₂ − x₁)⁻¹
+P = Q     λ = (3x₁² + a)·(2y₁)⁻¹
+결과      x₃ = λ² − x₁ − x₂,   y₃ = λ(x₁ − x₃) − y₁
+항등원    무한원점 𝒪,   P + (−P) = 𝒪,   −(x, y) = (x, −y)
+ECDLP     Q = k·P에서 k 찾기  — 일반 공격은 O(√위수)</div>
+    <p>하세 정리: 점의 개수 #E는 p + 1 − 2√p ≤ #E ≤ p + 1 + 2√p 범위에 있습니다.</p>
+  </details>
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label for="ec-a">a</label><input type="text" id="ec-a" class="mono" value="2" style="width:80px"></div>
+      <div class="field"><label for="ec-b">b</label><input type="text" id="ec-b" class="mono" value="3" style="width:80px"></div>
+      <div class="field"><label for="ec-p">p (소수, 3–251)</label><input type="text" id="ec-p" class="mono" value="97" style="width:100px"></div>
+      <span id="ec-info" class="note"></span>
+    </div>
+    <div class="ecwrap">
+      <canvas id="ec-cv" width="600" height="600" aria-label="곡선 위의 점 그림. 눌러서 P와 Q를 고릅니다."></canvas>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+        <dl class="kv" id="ec-sel"></dl>
+        <div class="out" id="ec-add">점을 눌러 P를 고르고, 한 번 더 눌러 Q를 고르세요. 같은 점을 두 번 누르면 2P를 계산합니다.</div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>P</span><span><i style="background:var(--ink)"></i>Q</span><span><i style="background:var(--hot)"></i>P + Q</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="panel">
+      <h2>스칼라 곱 k·P <small>더블-앤드-애드</small></h2>
+      <div class="row"><div class="field grow"><label for="ec-k">k</label><input type="text" id="ec-k" class="mono" value="13"></div></div>
+      <div class="out" id="ec-mul"></div>
+      <div class="field"><label>P가 생성하는 부분군 ⟨P⟩</label><div class="chips" id="ec-orbit"></div></div>
+    </div>
+    <div class="panel">
+      <h2>미니 ECDH <small>생성원 G = P</small></h2>
+      <div class="row">
+        <div class="field grow"><label for="ec-da">앨리스 비밀 a</label><input type="text" id="ec-da" class="mono" value="7"></div>
+        <div class="field grow"><label for="ec-db">밥 비밀 b</label><input type="text" id="ec-db" class="mono" value="11"></div>
+      </div>
+      <dl class="kv" id="ec-dh"></dl>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>생각해 볼 문제</h2>
+    <ol class="qs">
+      <li>점 하나를 골라 위수를 확인하고, 그것이 #E의 약수인지 확인하세요(라그랑주 정리). 왜 그래야 하나요?</li>
+      <li>a = 0, b = 0처럼 판별식이 0이 되는 곡선은 왜 암호에 쓸 수 없나요?</li>
+      <li>256비트 타원곡선이 3072비트 RSA와 비슷한 보안 수준을 주는 이유를, 가장 빠른 알려진 공격의 복잡도로 비교해 보세요.</li>
+    </ol>
+  </div>
+</section>
+
+  </main>
+</div>
+
+<script>
+"use strict";
+/* ══════════════════════ 공통 도구 ══════════════════════ */
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Number(n).toLocaleString("ko-KR");
+const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const kv = (el, pairs) => { el.innerHTML = pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join(""); };
+const later = fn => new Promise(res => setTimeout(() => res(fn()), 20));
+function parseBig(str, name) {
+  const s = String(str).trim().replace(/[\s,_]/g, "");
+  if (!/^-?\d+$/.test(s)) throw new Error(`${name}에는 정수를 넣어 주세요.`);
+  return BigInt(s);
+}
+function randBytes(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return a; }
+const toHex = b => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+function fromHex(h, len) {
+  const s = h.trim().replace(/\s+/g, "").toLowerCase();
+  if (!/^[0-9a-f]*$/.test(s) || s.length !== len * 2) throw new Error(`16진수 ${len * 2}자가 필요합니다(지금 ${s.length}자).`);
+  return Uint8Array.from(s.match(/../g), x => parseInt(x, 16));
+}
+const popcount8 = x => { let c = 0; while (x) { c += x & 1; x >>= 1; } return c; };
+
+/* ══════════════════════ BigInt 정수론 ══════════════════════ */
+const bmod = (a, m) => ((a % m) + m) % m;
+function bgcd(a, b) { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) [a, b] = [b, a % b]; return a; }
+function egcd(a, b) {
+  let [r0, r1, s0, s1, t0, t1] = [a, b, 1n, 0n, 0n, 1n];
+  const rows = [{ q: "", r: r0, s: s0, t: t0 }, { q: "", r: r1, s: s1, t: t1 }];
+  while (r1 !== 0n) {
+    const q = r0 / r1;
+    [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; [t0, t1] = [t1, t0 - q * t1];
+    rows.push({ q, r: r1, s: s1, t: t1 });
+  }
+  return { g: r0, s: s0, t: t0, rows };
+}
+function modInv(a, m) { const { g, s } = egcd(bmod(a, m), m); if (g !== 1n) return null; return bmod(s, m); }
+function modPow(b, e, m) {
+  if (m === 1n) return 0n;
+  let r = 1n; b = bmod(b, m);
+  while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; }
+  return r;
+}
+function modPowTrace(b, e, m) {
+  const bits = e.toString(2); let acc = 1n % m; b = bmod(b, m); const rows = [];
+  for (const bit of bits) { const sq = acc * acc % m; acc = bit === "1" ? sq * b % m : sq; rows.push({ bit, sq, acc }); }
+  return { acc, rows, bits };
+}
+const MR_BASES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n]; // n < 3.3·10²⁴ 에서 결정적
+function isPrime(n) {
+  if (n < 2n) return false;
+  for (const p of MR_BASES) { if (n === p) return true; if (n % p === 0n) return false; }
+  let d = n - 1n, s = 0; while ((d & 1n) === 0n) { d >>= 1n; s++; }
+  outer: for (const a of MR_BASES) {
+    let x = modPow(a, d, n);
+    if (x === 1n || x === n - 1n) continue;
+    for (let i = 1; i < s; i++) { x = x * x % n; if (x === n - 1n) continue outer; }
+    return false;
+  }
+  return true;
+}
+function randBits(bits) {
+  const bytes = randBytes(Math.ceil(bits / 8)); let x = 0n;
+  for (const b of bytes) x = (x << 8n) | BigInt(b);
+  x &= (1n << BigInt(bits)) - 1n;
+  return x | (1n << BigInt(bits - 1)); // 최상위 비트 고정
+}
+function randPrime(bits) { for (;;) { const c = randBits(bits) | 1n; if (isPrime(c)) return c; } }
+function randSafePrime(bits) { for (;;) { const q = randPrime(bits - 1); const p = 2n * q + 1n; if (isPrime(p)) return p; } }
+function randRange(lo, hi) { // [lo, hi]
+  const span = hi - lo + 1n; const bits = span.toString(2).length + 16;
+  let x = 0n; for (const b of randBytes(Math.ceil(bits / 8))) x = (x << 8n) | BigInt(b);
+  return lo + x % span;
+}
+function factorSmall(n) { // 시행 나눗셈 소인수(중복 제거)
+  const fs = []; let d = 2n;
+  while (d * d <= n) { if (n % d === 0n) { fs.push(d); while (n % d === 0n) n /= d; } d += d === 2n ? 1n : 2n; }
+  if (n > 1n) fs.push(n); return fs;
+}
+function isGenerator(g, p) { const n = p - 1n; return factorSmall(n).every(q => modPow(g, n / q, p) !== 1n); }
+function pollardRho(n) {
+  if (n % 2n === 0n) return { d: 2n, steps: 1 };
+  let total = 0;
+  for (let c = 1n; c < 50n; c++) {
+    let x = 2n, y = 2n, d = 1n;
+    const f = v => (v * v + c) % n;
+    while (d === 1n) { x = f(x); y = f(f(y)); d = bgcd(x - y, n); total++; if (total > 5e6) return null; }
+    if (d !== n) return { d, steps: total };
+  }
+  return null;
+}
+
+/* ══════════════════════ 1. 고전 암호 ══════════════════════ */
+const AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const EN_FREQ = [8.17, 1.49, 2.78, 4.25, 12.70, 2.23, 2.02, 6.09, 6.97, 0.15, 0.77, 4.03, 2.41, 6.75, 7.51, 1.93, 0.10, 5.99, 6.33, 9.06, 2.76, 0.98, 2.36, 0.15, 1.97, 0.07];
+function shiftChar(ch, k) {
+  const c = ch.charCodeAt(0); k = ((k % 26) + 26) % 26;
+  if (c >= 65 && c <= 90) return String.fromCharCode((c - 65 + k) % 26 + 65);
+  if (c >= 97 && c <= 122) return String.fromCharCode((c - 97 + k) % 26 + 97);
+  return ch;
+}
+const caesar = (t, k) => Array.from(t, c => shiftChar(c, k)).join("");
+function vigenere(t, key, dir) {
+  const ks = key.toUpperCase().replace(/[^A-Z]/g, ""); if (!ks) return t;
+  let j = 0;
+  return Array.from(t, c => /[A-Za-z]/.test(c) ? shiftChar(c, dir * (ks.charCodeAt(j++ % ks.length) - 65)) : c).join("");
+}
+const lettersOf = t => t.toUpperCase().replace(/[^A-Z]/g, "");
+function letterCounts(s) { const c = new Array(26).fill(0); for (const ch of s) c[ch.charCodeAt(0) - 65]++; return c; }
+function chi2(s) { const c = letterCounts(s), n = s.length || 1; let x = 0; for (let i = 0; i < 26; i++) { const e = EN_FREQ[i] / 100 * n; x += (c[i] - e) ** 2 / e; } return x; }
+function ioc(s) { const c = letterCounts(s), n = s.length; if (n < 2) return 0; let x = 0; for (const v of c) x += v * (v - 1); return x / (n * (n - 1)); }
+function crackCaesar(s) { return Array.from({ length: 26 }, (_, k) => ({ k, chi: chi2(lettersOf(caesar(s, -k))) })).sort((a, b) => a.chi - b.chi); }
+function columns(L, m) { const cols = Array.from({ length: m }, () => ""); for (let i = 0; i < L.length; i++) cols[i % m] += L[i]; return cols; }
+function crackVigenere(ct, maxLen = 12) {
+  const L = lettersOf(ct);
+  const rows = [];
+  for (let m = 1; m <= Math.min(maxLen, Math.max(1, Math.floor(L.length / 4))); m++) {
+    const cols = columns(L, m); rows.push({ m, ic: cols.reduce((s, c) => s + ioc(c), 0) / m });
+  }
+  const best = rows.find(r => r.ic > 0.058) || rows.reduce((a, b) => (b.ic > a.ic ? b : a), rows[0]);
+  const key = columns(L, best.m).map(c => AZ[crackCaesar(c)[0].k]).join("");
+  return { rows, best, key };
+}
+const CLASSIC_SAMPLE = "Cryptography is the study of techniques for secure communication in the presence of adversaries. A cipher turns readable plaintext into ciphertext using a secret key, and only someone who holds the key should be able to reverse the process. Classical ciphers such as the Caesar shift and the Vigenere cipher hide the letters but not their statistics, so a patient analyst who counts how often each letter appears can often recover the key without ever being told it. Modern ciphers are designed so that the ciphertext looks random even to an attacker who sees millions of examples, and their security rests on mathematical problems that are believed to be hard rather than on keeping the algorithm itself secret. This principle was stated by Auguste Kerckhoffs in the nineteenth century and remains the foundation of the field today.";
+
+function initClassic() {
+  const alg = $("#cl-alg"), shift = $("#cl-shift"), key = $("#cl-key"), pt = $("#cl-pt"), ct = $("#cl-ct");
+  pt.value = CLASSIC_SAMPLE;
+  const encrypt = () => {
+    const isC = alg.value === "caesar";
+    $("#cl-shift-f").hidden = !isC; $("#cl-key-f").hidden = isC;
+    $("#cl-shift-v").textContent = shift.value;
+    ct.value = isC ? caesar(pt.value, +shift.value) : vigenere(pt.value, key.value, 1);
+    analyse();
+  };
+  const analyse = () => {
+    const L = lettersOf(ct.value), c = letterCounts(L), n = L.length || 1;
+    const maxV = Math.max(13, ...c.map(v => v / n * 100));
+    $("#cl-freq").innerHTML = AZ.split("").map((ch, i) => {
+      const o = c[i] / n * 100, e = EN_FREQ[i];
+      return `<div class="col" title="${ch}: 관측 ${o.toFixed(1)}%, 기대 ${e}%"><div class="bars"><i class="b" style="height:${o / maxV * 100}%"></i><i class="b exp" style="height:${e / maxV * 100}%"></i></div><span class="lt">${ch}</span></div>`;
+    }).join("");
+    $("#cl-ic").textContent = `글자 ${fmt(L.length)}개 · IC = ${ioc(L).toFixed(4)}`;
+    if (L.length < 20) { $("#cl-caesar").innerHTML = ""; $("#cl-ioc").innerHTML = ""; $("#cl-vres").innerHTML = ""; $("#cl-crack").textContent = "분석하려면 영문 글자가 20자 이상 필요합니다."; return; }
+    const cs = crackCaesar(ct.value);
+    $("#cl-caesar").innerHTML = `<tr><th>k</th><th>χ²</th><th style="text-align:left">복호 미리보기</th></tr>` +
+      cs.map((r, i) => `<tr${i === 0 ? ' class="hl"' : ""}><td>${r.k}</td><td>${r.chi.toFixed(1)}</td><td style="text-align:left">${esc(caesar(ct.value.slice(0, 32), -r.k))}…</td></tr>`).join("");
+    const v = crackVigenere(ct.value);
+    $("#cl-ioc").innerHTML = `<tr><th>키 길이 m</th><th>평균 IC</th><th style="text-align:left">막대</th></tr>` +
+      v.rows.map(r => `<tr${r.m === v.best.m ? ' class="hl"' : ""}><td>${r.m}</td><td>${r.ic.toFixed(4)}</td><td style="text-align:left"><span style="display:inline-block;height:8px;background:var(--accent);width:${Math.max(2, (r.ic - 0.03) / 0.045 * 120)}px;border-radius:1px"></span></td></tr>`).join("");
+    kv($("#cl-vres"), [["추정 키 길이", v.best.m], ["추정 키", `<b>${v.key}</b>`]]);
+    const caesarWins = cs[0].chi < chi2(lettersOf(vigenere(ct.value, v.key, -1)));
+    $("#cl-crack").textContent = caesarWins
+      ? `[카이사르로 판단, k = ${cs[0].k}]\n` + caesar(ct.value, -cs[0].k)
+      : `[비즈네르로 판단, 키 = ${v.key}]\n` + vigenere(ct.value, v.key, -1);
+  };
+  [alg, shift, key, pt].forEach(el => el.addEventListener("input", encrypt));
+  ct.addEventListener("input", analyse);
+  encrypt();
+}
+
+/* ══════════════════════ 2. 모듈러 산술 ══════════════════════ */
+function initModular() {
+  const runEg = () => {
+    try {
+      const a = parseBig($("#md-a").value, "a"), m = parseBig($("#md-m").value, "m");
+      if (a < 0n || m <= 0n) throw new Error("a ≥ 0, m > 0 이어야 합니다.");
+      const r = egcd(a, m);
+      $("#md-eg").innerHTML = `<tr><th>단계</th><th>몫 q</th><th>나머지 r</th><th>s</th><th>t</th></tr>` +
+        r.rows.map((x, i) => `<tr${x.r === r.g && i === r.rows.length - 2 ? ' class="hl"' : ""}><td>${i}</td><td>${x.q}</td><td>${x.r}</td><td>${x.s}</td><td>${x.t}</td></tr>`).join("");
+      const inv = r.g === 1n ? bmod(r.s, m) : null;
+      $("#md-egres").textContent = `gcd(${a}, ${m}) = ${r.g}\n${a}·(${r.s}) + ${m}·(${r.t}) = ${a * r.s + m * r.t}\n` +
+        (inv !== null ? `역원: ${a}⁻¹ ≡ ${inv} (mod ${m})   검산: ${a}·${inv} mod ${m} = ${a * inv % m}` : `gcd가 1이 아니므로 ${a}는 mod ${m}에서 역원이 없습니다.`);
+    } catch (e) { $("#md-eg").innerHTML = ""; $("#md-egres").textContent = e.message; }
+  };
+  const runPow = () => {
+    try {
+      const b = parseBig($("#mp-b").value, "b"), e = parseBig($("#mp-e").value, "e"), m = parseBig($("#mp-m").value, "m");
+      if (e < 0n || m <= 0n) throw new Error("e ≥ 0, m > 0 이어야 합니다.");
+      const t = modPowTrace(b, e, m);
+      $("#mp-tbl").innerHTML = `<tr><th>비트</th><th>acc² mod m</th><th>곱셈 후 acc</th></tr>` +
+        t.rows.map(r => `<tr${r.bit === "1" ? ' class="hl"' : ""}><td>${r.bit}</td><td>${r.sq}</td><td>${r.bit === "1" ? r.acc : "—"}</td></tr>`).join("");
+      const ones = [...t.bits].filter(x => x === "1").length;
+      $("#mp-res").textContent = `${e} = ${t.bits}₂ (${t.bits.length}비트)\n결과: ${b}^${e} mod ${m} = ${t.acc}\n모듈러 곱셈 ${t.bits.length + ones}회 (단순 반복이면 ${e > 0n ? e - 1n : 0n}회)` +
+        (t.acc === modPow(b, e, m) ? "" : "\n⚠ 검산 불일치");
+    } catch (e) { $("#mp-tbl").innerHTML = ""; $("#mp-res").textContent = e.message; }
+  };
+  ["#md-a", "#md-m"].forEach(s => $(s).addEventListener("input", runEg));
+  ["#mp-b", "#mp-e", "#mp-m"].forEach(s => $(s).addEventListener("input", runPow));
+  runEg(); runPow();
+}
+
+/* ══════════════════════ 3. RSA ══════════════════════ */
+function rsaKey(p, q, e) {
+  if (!isPrime(p) || !isPrime(q)) throw new Error("p와 q는 소수여야 합니다.");
+  if (p === q) throw new Error("p와 q는 서로 달라야 합니다(p = q이면 φ(n) = p(p−1)이고, n의 제곱근으로 바로 깨집니다).");
+  const n = p * q, phi = (p - 1n) * (q - 1n);
+  if (e <= 1n || e >= phi) throw new Error(`e는 1 < e < φ(n) = ${phi} 범위여야 합니다.`);
+  const d = modInv(e, phi);
+  if (d === null) throw new Error(`gcd(e, φ(n)) = ${bgcd(e, phi)} ≠ 1 이라 d가 없습니다. 다른 e(예: 3, 17, 65537)를 고르세요.`);
+  return { p, q, n, phi, e, d, dp: d % (p - 1n), dq: d % (q - 1n), qinv: modInv(q, p) };
+}
+function rsaDecryptCRT(c, k) {
+  const mp = modPow(c, k.dp, k.p), mq = modPow(c, k.dq, k.q);
+  const h = bmod((mp - mq) * k.qinv, k.p);
+  return { mp, mq, h, m: mq + k.q * h };
+}
+let RSA = null;
+function initRSA() {
+  const show = () => {
+    const keyEl = $("#rsa-key");
+    if (!RSA) return;
+    const k = RSA;
+    kv(keyEl, [
+      ["n = p·q", `${k.n} <span class="note">(${k.n.toString(2).length}비트)</span>`],
+      ["φ(n)", k.phi], ["공개키 (n, e)", `(${k.n}, ${k.e})`], ["개인키 d", k.d],
+      ["검산 e·d mod φ", (k.e * k.d) % k.phi], ["CRT 값", `d_p = ${k.dp}, d_q = ${k.dq}, q⁻¹ mod p = ${k.qinv}`],
+    ]);
+    runInt(); runHom(); runText();
+    $("#rsa-atk").textContent = "버튼을 눌러 현재 n을 인수분해해 보세요.";
+  };
+  const runInt = () => {
+    if (!RSA) return;
+    try {
+      const m = parseBig($("#rsa-m").value, "m");
+      if (m < 0n || m >= RSA.n) throw new Error(`m은 0 이상 n(= ${RSA.n}) 미만이어야 합니다.`);
+      const c = modPow(m, RSA.e, RSA.n), m2 = modPow(c, RSA.d, RSA.n), cr = rsaDecryptCRT(c, RSA);
+      kv($("#rsa-int"), [["c = mᵉ mod n", c], ["cᵈ mod n", m2], ["CRT: m_p, m_q", `${cr.mp}, ${cr.mq}`], ["CRT 결과", cr.m],
+        ["일치", m2 === m && cr.m === m ? '<span class="pill ok">복호 성공</span>' : '<span class="pill bad">불일치</span>']]);
+    } catch (e) { $("#rsa-int").innerHTML = `<dt>오류</dt><dd>${esc(e.message)}</dd>`; }
+  };
+  const runHom = () => {
+    if (!RSA) return;
+    try {
+      const m1 = parseBig($("#rsa-m1").value, "m₁"), m2 = parseBig($("#rsa-m2").value, "m₂"), { n, e, d } = RSA;
+      const c1 = modPow(m1, e, n), c2 = modPow(m2, e, n), c3 = c1 * c2 % n, dec = modPow(c3, d, n);
+      kv($("#rsa-hom"), [["c₁, c₂", `${c1}, ${c2}`], ["c₁·c₂ mod n", c3], ["복호 결과", dec], ["m₁·m₂ mod n", (m1 * m2) % n],
+        ["", dec === bmod(m1 * m2, n) ? '<span class="pill hot">암호문만으로 곱을 만들었다</span>' : ""]]);
+    } catch (e) { $("#rsa-hom").innerHTML = `<dt>오류</dt><dd>${esc(e.message)}</dd>`; }
+  };
+  const runText = () => {
+    if (!RSA) return;
+    const out = $("#rsa-textout");
+    if (RSA.n <= 255n) { out.textContent = `n = ${RSA.n}은 255보다 작아 바이트(0–255)를 담을 수 없습니다. 더 큰 p, q를 쓰세요.`; return; }
+    const bytes = new TextEncoder().encode($("#rsa-text").value);
+    const cs = Array.from(bytes, b => modPow(BigInt(b), RSA.e, RSA.n));
+    const back = new TextDecoder().decode(Uint8Array.from(cs, c => Number(modPow(c, RSA.d, RSA.n))));
+    out.textContent = `UTF-8 바이트 ${bytes.length}개\n암호문: [${cs.join(", ")}]\n복호: ${back}`;
+  };
+  const fromInputs = () => {
+    try { RSA = rsaKey(parseBig($("#rsa-p").value, "p"), parseBig($("#rsa-q").value, "q"), parseBig($("#rsa-e").value, "e")); show(); }
+    catch (e) { RSA = null; kv($("#rsa-key"), [["오류", esc(e.message)]]); ["#rsa-int", "#rsa-hom"].forEach(s => $(s).innerHTML = ""); $("#rsa-textout").textContent = ""; }
+  };
+  $("#rsa-gen").addEventListener("click", () => {
+    const bits = +$("#rsa-bits").value;
+    for (;;) {
+      const p = randPrime(bits), q = randPrime(bits); if (p === q) continue;
+      const phi = (p - 1n) * (q - 1n), e = phi > 65537n ? 65537n : 17n;
+      if (bgcd(e, phi) !== 1n || e >= phi) continue;
+      $("#rsa-p").value = p; $("#rsa-q").value = q; $("#rsa-e").value = e; break;
+    }
+    const n = BigInt($("#rsa-p").value) * BigInt($("#rsa-q").value);
+    $("#rsa-m").value = (n / 3n).toString(); fromInputs();
+  });
+  $("#rsa-calc").addEventListener("click", fromInputs);
+  ["#rsa-p", "#rsa-q", "#rsa-e"].forEach(s => $(s).addEventListener("change", fromInputs));
+  $("#rsa-m").addEventListener("input", runInt);
+  ["#rsa-m1", "#rsa-m2"].forEach(s => $(s).addEventListener("input", runHom));
+  $("#rsa-text").addEventListener("input", runText);
+  const attack = async (kind, btn) => {
+    if (!RSA) return;
+    const n = RSA.n, out = $("#rsa-atk"); btn.disabled = true; out.textContent = "계산 중…";
+    const res = await later(() => {
+      const t0 = performance.now();
+      if (kind === "trial") {
+        const LIMIT = 3e6; let d = 2n, steps = 0;
+        while (d * d <= n) { steps++; if (n % d === 0n) return { d, steps, ms: performance.now() - t0 }; if (steps >= LIMIT) return { fail: true, steps, ms: performance.now() - t0 }; d += d === 2n ? 1n : 2n; }
+        return { fail: true, steps, ms: performance.now() - t0 };
+      }
+      const r = pollardRho(n); return r ? { ...r, ms: performance.now() - t0 } : { fail: true, steps: 5e6, ms: performance.now() - t0 };
+    });
+    btn.disabled = false;
+    const name = kind === "trial" ? "시행 나눗셈" : "폴라드 ρ";
+    if (res.fail) { out.textContent = `${name}: ${fmt(res.steps)}번 시도 후 중단 (${res.ms.toFixed(0)}ms). 이 방법으로는 n을 현실적인 시간에 쪼갤 수 없습니다.`; return; }
+    const p = res.d, q = n / p, phi = (p - 1n) * (q - 1n), d = modInv(RSA.e, phi);
+    out.textContent = `${name}: ${fmt(res.steps)}번 만에 성공 (${res.ms.toFixed(1)}ms)\nn = ${p} × ${q}\nφ(n) = ${phi}\n복원한 d = ${d}  ${d === RSA.d ? "← 개인키와 일치, 키가 깨졌습니다." : ""}`;
+  };
+  $("#rsa-trial").addEventListener("click", e => attack("trial", e.currentTarget));
+  $("#rsa-rho").addEventListener("click", e => attack("rho", e.currentTarget));
+  fromInputs();
+}
+
+/* ══════════════════════ 4. 디피–헬만 ══════════════════════ */
+function bsgs(g, h, p) {
+  const n = p - 1n, m = BigInt(Math.ceil(Math.sqrt(Number(n))));
+  const table = new Map(); let e = 1n;
+  for (let j = 0n; j < m; j++) { const k = e.toString(); if (!table.has(k)) table.set(k, j); e = e * g % p; }
+  const factor = modInv(modPow(g, m, p), p); let gamma = bmod(h, p);
+  for (let i = 0n; i <= m; i++) {
+    const j = table.get(gamma.toString());
+    if (j !== undefined) return { x: (i * m + j) % n, steps: Number(m + i + 1n) };
+    gamma = gamma * factor % p;
+  }
+  return null;
+}
+function initDH() {
+  const party = (cls, title, rows) => `<div class="party ${cls}"><h3>${title}</h3><dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`;
+  let cur = null;
+  const run = () => {
+    const warn = $("#dh-warn"); warn.textContent = "";
+    $("#dh-e-f").hidden = !$("#dh-mitm").checked;
+    try {
+      const p = parseBig($("#dh-p").value, "p"), g = parseBig($("#dh-g").value, "g"), a = parseBig($("#dh-a").value, "a"), b = parseBig($("#dh-b").value, "b");
+      if (!isPrime(p)) throw new Error("p는 소수여야 합니다.");
+      if (g < 2n || g >= p) throw new Error("g는 2 ≤ g < p 범위여야 합니다.");
+      if (a < 1n || b < 1n) throw new Error("비밀값은 1 이상이어야 합니다.");
+      if (p.toString(2).length <= 48 && !isGenerator(g, p)) warn.textContent = `참고: g = ${g}는 mod ${p}의 생성원이 아닙니다. 공유 키가 가질 수 있는 값이 줄어듭니다.`;
+      const A = modPow(g, a, p), B = modPow(g, b, p);
+      cur = { p, g, A };
+      if (!$("#dh-mitm").checked) {
+        const KA = modPow(B, a, p), KB = modPow(A, b, p);
+        $("#dh-parties").innerHTML =
+          party("", "앨리스", [["비밀 a", a], ["보냄 A = gᵃ", A], ["받음", `B = ${B}`], ["키 Bᵃ", `<b>${KA}</b>`]]) +
+          party("", "밥", [["비밀 b", b], ["보냄 B = gᵇ", B], ["받음", `A = ${A}`], ["키 Aᵇ", `<b>${KB}</b>`]]) +
+          party("eve", "이브 (도청만)", [["보이는 값", `p, g, A = ${A}, B = ${B}`], ["키", "모름: a 또는 b를 구해야 함"], ["결과", KA === KB ? '<span class="pill ok">앨리스 = 밥</span>' : '<span class="pill bad">불일치</span>']]);
+      } else {
+        const e = parseBig($("#dh-e").value, "e"), E = modPow(g, e, p);
+        const KA = modPow(E, a, p), KB = modPow(E, b, p), KEA = modPow(A, e, p), KEB = modPow(B, e, p);
+        $("#dh-parties").innerHTML =
+          party("", "앨리스", [["비밀 a", a], ["보냄", `A = ${A}`], ["받음(가짜)", `E = ${E}`], ["키 Eᵃ", `<b>${KA}</b>`]]) +
+          party("", "밥", [["비밀 b", b], ["보냄", `B = ${B}`], ["받음(가짜)", `E = ${E}`], ["키 Eᵇ", `<b>${KB}</b>`]]) +
+          party("eve", "이브 (중간자)", [["비밀 e", e], ["양쪽에 보냄", `E = gᵉ = ${E}`], ["앨리스와의 키 Aᵉ", `<b>${KEA}</b>`], ["밥과의 키 Bᵉ", `<b>${KEB}</b>`],
+            ["결과", KEA === KA && KEB === KB ? '<span class="pill hot">두 키를 모두 가짐, 중계하며 복호 가능</span>' : ""]]);
+      }
+    } catch (err) { cur = null; $("#dh-parties").innerHTML = `<div class="party"><p>${esc(err.message)}</p></div>`; }
+  };
+  $("#dh-gen").addEventListener("click", () => {
+    const bits = +$("#dh-bits").value, p = randSafePrime(bits);
+    let g = 2n; while (!isGenerator(g, p)) g++;
+    $("#dh-p").value = p; $("#dh-g").value = g;
+    $("#dh-a").value = randRange(2n, p - 2n); $("#dh-b").value = randRange(2n, p - 2n); $("#dh-e").value = randRange(2n, p - 2n);
+    run(); $("#dh-atk").textContent = "새 매개변수입니다. 공격 버튼을 눌러 보세요.";
+  });
+  ["#dh-p", "#dh-g", "#dh-a", "#dh-b", "#dh-e", "#dh-mitm"].forEach(s => $(s).addEventListener("input", run));
+  const attack = async (kind, btn) => {
+    if (!cur) return;
+    const { p, g, A } = cur, out = $("#dh-atk"); btn.disabled = true; out.textContent = "계산 중…";
+    const res = await later(() => {
+      const t0 = performance.now();
+      if (kind === "brute") {
+        let x = 1n, v = g % p; const LIMIT = 3e6;
+        for (let i = 1; i <= LIMIT; i++, x++) { if (v === A) return { x, steps: i, ms: performance.now() - t0 }; v = v * g % p; if (x >= p - 1n) break; }
+        return { fail: true, steps: Math.min(LIMIT, Number(p - 1n)), ms: performance.now() - t0 };
+      }
+      if (p.toString(2).length > 44) return { fail: true, steps: 0, ms: 0, big: true };
+      const r = bsgs(g, A, p); return r ? { x: r.x, steps: r.steps, ms: performance.now() - t0 } : { fail: true, steps: 0, ms: performance.now() - t0 };
+    });
+    btn.disabled = false;
+    const name = kind === "brute" ? "전수 조사" : "아기걸음-거인걸음";
+    if (res.big) { out.textContent = "이 데모의 아기걸음-거인걸음은 44비트 이하 p만 다룹니다(메모리 √p 필요)."; return; }
+    if (res.fail) { out.textContent = `${name}: ${fmt(res.steps)}단계 안에 찾지 못했습니다 (${res.ms.toFixed(0)}ms).`; return; }
+    out.textContent = `${name}: ${fmt(res.steps)}단계, ${res.ms.toFixed(1)}ms\ng^x ≡ A 를 만족하는 x = ${res.x}\n검산 g^x mod p = ${modPow(g, res.x, p)} (A = ${A})\n이 x로 Bˣ를 계산하면 공유 키를 얻습니다.`;
+  };
+  $("#dh-brute").addEventListener("click", e => attack("brute", e.currentTarget));
+  $("#dh-bsgs").addEventListener("click", e => attack("bsgs", e.currentTarget));
+  run();
+}
+
+/* ══════════════════════ 5. AES-128 ══════════════════════ */
+const xtime = b => ((b << 1) ^ (b & 0x80 ? 0x1b : 0)) & 0xff;
+function gmul(a, b) { let r = 0; while (b) { if (b & 1) r ^= a; a = xtime(a); b >>= 1; } return r; }
+const rotl8 = (x, s) => ((x << s) | (x >> (8 - s))) & 0xff;
+const SBOX = new Uint8Array(256), INV_SBOX = new Uint8Array(256);
+(() => { // S-box = GF(2⁸) 역원 뒤 아핀 변환
+  const inv = new Uint8Array(256);
+  for (let a = 1; a < 256; a++) for (let b = 1; b < 256; b++) if (gmul(a, b) === 1) { inv[a] = b; break; }
+  for (let a = 0; a < 256; a++) { const x = inv[a]; SBOX[a] = x ^ rotl8(x, 1) ^ rotl8(x, 2) ^ rotl8(x, 3) ^ rotl8(x, 4) ^ 0x63; INV_SBOX[SBOX[a]] = a; }
+})();
+function expandKey(key) {
+  const w = new Uint8Array(176); w.set(key); let rcon = 1;
+  for (let i = 16; i < 176; i += 4) {
+    let t = [w[i - 4], w[i - 3], w[i - 2], w[i - 1]];
+    if (i % 16 === 0) { t = [SBOX[t[1]] ^ rcon, SBOX[t[2]], SBOX[t[3]], SBOX[t[0]]]; rcon = xtime(rcon); }
+    for (let j = 0; j < 4; j++) w[i + j] = w[i - 16 + j] ^ t[j];
+  }
+  return w;
+}
+function aesEncryptBlock(input, w, trace) {
+  const s = Uint8Array.from(input), T = trace ? [] : null;
+  const snap = (r, step) => { if (T) T.push({ r, step, s: Uint8Array.from(s) }); };
+  const addRK = r => { for (let i = 0; i < 16; i++) s[i] ^= w[16 * r + i]; };
+  snap(0, "입력"); addRK(0); snap(0, "AddRoundKey");
+  for (let r = 1; r <= 10; r++) {
+    for (let i = 0; i < 16; i++) s[i] = SBOX[s[i]];
+    snap(r, "SubBytes");
+    const t = Uint8Array.from(s);
+    for (let row = 1; row < 4; row++) for (let c = 0; c < 4; c++) s[row + 4 * c] = t[row + 4 * ((c + row) % 4)];
+    snap(r, "ShiftRows");
+    if (r < 10) {
+      for (let c = 0; c < 4; c++) {
+        const [a0, a1, a2, a3] = s.subarray(4 * c, 4 * c + 4);
+        s[4 * c] = gmul(a0, 2) ^ gmul(a1, 3) ^ a2 ^ a3;
+        s[4 * c + 1] = a0 ^ gmul(a1, 2) ^ gmul(a2, 3) ^ a3;
+        s[4 * c + 2] = a0 ^ a1 ^ gmul(a2, 2) ^ gmul(a3, 3);
+        s[4 * c + 3] = gmul(a0, 3) ^ a1 ^ a2 ^ gmul(a3, 2);
+      }
+      snap(r, "MixColumns");
+    }
+    addRK(r); snap(r, "AddRoundKey");
+  }
+  return T ? { out: s, trace: T } : s;
+}
+function initAES() {
+  let last = null;
+  const grid = (s, prev) => Array.from({ length: 16 }, (_, i) => { const r = i >> 2, c = i & 3, idx = r + 4 * c; return `<span class="${prev && prev[idx] !== s[idx] ? "chg" : ""}">${s[idx].toString(16).padStart(2, "0")}</span>`; }).join("");
+  const run = () => {
+    try {
+      const key = fromHex($("#aes-key").value, 16), pt = fromHex($("#aes-pt").value, 16), w = expandKey(key);
+      const { out, trace } = aesEncryptBlock(pt, w, true);
+      last = { key, pt, w, trace };
+      const isFips = toHex(key) === "000102030405060708090a0b0c0d0e0f" && toHex(pt) === "00112233445566778899aabbccddeeff";
+      kv($("#aes-res"), [["암호문", `<b>${toHex(out)}</b>`]]);
+      $("#aes-check").innerHTML = isFips ? (toHex(out) === "69c4e0d86a7b0430d8cdb78070b4c55a" ? '<span class="pill ok">FIPS-197 기대값 69c4e0d8…c55a와 일치</span>' : '<span class="pill bad">FIPS-197 기대값과 불일치</span>') : "";
+      drawRound(); drawAval();
+    } catch (e) { last = null; kv($("#aes-res"), [["오류", esc(e.message)]]); $("#aes-states").innerHTML = ""; $("#aes-av").innerHTML = ""; $("#aes-check").innerHTML = ""; }
+  };
+  const drawRound = () => {
+    if (!last) return;
+    const r = +$("#aes-round").value; $("#aes-rv").textContent = r;
+    const idx = last.trace.map((t, i) => [t, i]).filter(([t]) => t.r === r);
+    $("#aes-states").innerHTML = idx.map(([t, i]) => `<div class="state"><span class="cap">${t.step}</span><div class="grid4">${grid(t.s, i > 0 ? last.trace[i - 1].s : null)}</div></div>`).join("");
+    $("#aes-rk").innerHTML = grid(last.w.subarray(16 * r, 16 * r + 16), null);
+  };
+  const drawAval = () => {
+    if (!last) return;
+    const bit = +$("#aes-flip").value; $("#aes-flipv").textContent = bit;
+    const pt2 = Uint8Array.from(last.pt); pt2[bit >> 3] ^= 0x80 >> (bit & 7);
+    const t2 = aesEncryptBlock(pt2, last.w, true).trace;
+    const ends = tr => tr.filter(t => t.step === "AddRoundKey").map(t => t.s);
+    const a = ends(last.trace), b = ends(t2);
+    const diffs = a.map((s, r) => s.reduce((acc, v, i) => acc + popcount8(v ^ b[r][i]), 0));
+    $("#aes-av").innerHTML = `<div class="half" style="bottom:50%"></div>` + diffs.map(d => `<div class="rb"><span>${d}</span><i style="height:${d / 128 * 100}%"></i></div>`).join("");
+  };
+  $("#aes-fips").addEventListener("click", () => { $("#aes-key").value = "000102030405060708090a0b0c0d0e0f"; $("#aes-pt").value = "00112233445566778899aabbccddeeff"; run(); });
+  $("#aes-rand").addEventListener("click", () => { $("#aes-key").value = toHex(randBytes(16)); $("#aes-pt").value = toHex(randBytes(16)); run(); });
+  ["#aes-key", "#aes-pt"].forEach(s => $(s).addEventListener("input", run));
+  $("#aes-round").addEventListener("input", drawRound);
+  $("#aes-flip").addEventListener("input", drawAval);
+  run();
+}
+
+/* ══════════════════════ 6. 블록 운용 모드 ══════════════════════ */
+const IMG = 160;
+function encryptModes(data, key, iv, nonce) {
+  const w = expandKey(key), n = data.length, ecb = new Uint8Array(n), cbc = new Uint8Array(n), ctr = new Uint8Array(n);
+  let prev = Uint8Array.from(iv); const blk = new Uint8Array(16), cb = Uint8Array.from(nonce);
+  for (let off = 0, i = 0; off < n; off += 16, i++) {
+    const P = data.subarray(off, off + 16);
+    ecb.set(aesEncryptBlock(P, w), off);
+    for (let j = 0; j < 16; j++) blk[j] = P[j] ^ prev[j];
+    prev = aesEncryptBlock(blk, w); cbc.set(prev, off);
+    cb[12] = (i >>> 24) & 255; cb[13] = (i >>> 16) & 255; cb[14] = (i >>> 8) & 255; cb[15] = i & 255;
+    const ks = aesEncryptBlock(cb, w);
+    for (let j = 0; j < 16; j++) ctr[off + j] = P[j] ^ ks[j];
+  }
+  return { ecb, cbc, ctr };
+}
+function drawGray(canvas, bytes) {
+  const ctx = canvas.getContext("2d"), im = ctx.createImageData(IMG, IMG);
+  for (let i = 0; i < bytes.length; i++) { im.data[4 * i] = im.data[4 * i + 1] = im.data[4 * i + 2] = bytes[i]; im.data[4 * i + 3] = 255; }
+  ctx.putImageData(im, 0, 0);
+}
+function grayFrom(canvas) {
+  const d = canvas.getContext("2d").getImageData(0, 0, IMG, IMG).data, g = new Uint8Array(IMG * IMG);
+  for (let i = 0; i < g.length; i++) g[i] = Math.round(0.299 * d[4 * i] + 0.587 * d[4 * i + 1] + 0.114 * d[4 * i + 2]) & 0xf0; // 16단계로 양자화해 평평한 영역을 만든다
+  return g;
+}
+function paintSample(canvas, variant) {
+  const c = canvas.getContext("2d"); c.imageSmoothingEnabled = false;
+  c.fillStyle = "#e0e0e0"; c.fillRect(0, 0, IMG, IMG);
+  if (variant === 0) {
+    c.fillStyle = "#303030"; c.beginPath(); c.arc(80, 72, 46, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#e0e0e0"; c.fillRect(64, 64, 32, 44); c.beginPath(); c.arc(80, 64, 14, Math.PI, 0); c.lineWidth = 8; c.strokeStyle = "#e0e0e0"; c.stroke();
+    c.fillStyle = "#909090"; c.fillRect(16, 128, 128, 16);
+    c.fillStyle = "#303030"; c.fillRect(72, 78, 16, 18);
+  } else {
+    c.fillStyle = "#303030"; c.font = "bold 64px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("AES", 80, 80);
+    c.fillStyle = "#909090"; c.fillRect(0, 0, 160, 20);
+  }
+}
+function initModes() {
+  const orig = $("#cv-orig"); let custom = null;
+  const run = () => {
+    if (!custom) paintSample(orig, 0); else { const c = orig.getContext("2d"); c.drawImage(custom, 0, 0, IMG, IMG); }
+    const P = grayFrom(orig); drawGray(orig, P);
+    const key = randBytes(16), iv = randBytes(16), nonce = randBytes(16); nonce.fill(0, 12);
+    const r = encryptModes(P, key, iv, nonce);
+    drawGray($("#cv-ecb"), r.ecb); drawGray($("#cv-cbc"), r.cbc); drawGray($("#cv-ctr"), r.ctr);
+    const seen = new Set(); let dup = 0;
+    for (let o = 0; o < r.ecb.length; o += 16) { const h = toHex(r.ecb.subarray(o, o + 16)); if (seen.has(h)) dup++; else seen.add(h); }
+    $("#ecb-dup").textContent = `반복 블록 ${fmt(dup)}개 / 1,600`;
+    const reuse = $("#md-reuse").checked; $("#md-reuse-box").hidden = !reuse;
+    if (reuse) {
+      const o2 = $("#cv-orig2"); paintSample(o2, 1); const P2 = grayFrom(o2); drawGray(o2, P2);
+      const r2 = encryptModes(P2, key, iv, nonce);
+      drawGray($("#cv-ctr2"), r2.ctr);
+      drawGray($("#cv-xor"), r.ctr.map((v, i) => 255 - (v ^ r2.ctr[i])));
+    }
+  };
+  $("#md-run").addEventListener("click", run);
+  $("#md-reuse").addEventListener("change", run);
+  $("#md-file").addEventListener("change", e => {
+    const f = e.target.files[0]; if (!f) return;
+    const img = new Image(); img.onload = () => { custom = img; run(); URL.revokeObjectURL(img.src); };
+    img.src = URL.createObjectURL(f);
+  });
+  run();
+  return run;
+}
+
+/* ══════════════════════ 7. SHA-256 ══════════════════════ */
+const K256 = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+function sha256(msg) {
+  const data = typeof msg === "string" ? new TextEncoder().encode(msg) : msg;
+  const bitLen = data.length * 8, total = Math.ceil((data.length + 9) / 64) * 64;
+  const buf = new Uint8Array(total); buf.set(data); buf[data.length] = 0x80;
+  const dv = new DataView(buf.buffer);
+  dv.setUint32(total - 8, Math.floor(bitLen / 2 ** 32)); dv.setUint32(total - 4, bitLen >>> 0);
+  const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const W = new Uint32Array(64), rotr = (x, n) => (x >>> n) | (x << (32 - n));
+  for (let off = 0; off < total; off += 64) {
+    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(off + 4 * i);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(W[i - 15], 7) ^ rotr(W[i - 15], 18) ^ (W[i - 15] >>> 3);
+      const s1 = rotr(W[i - 2], 17) ^ rotr(W[i - 2], 19) ^ (W[i - 2] >>> 10);
+      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K256[i] + W[i]) | 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+  }
+  const out = new Uint8Array(32), ov = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) ov.setUint32(4 * i, H[i]);
+  return out;
+}
+function truncBits(d, n) { // 앞 n비트를 정수(Number)로, n ≤ 48
+  let v = 0; for (let i = 0; i < 6; i++) v = v * 256 + d[i];
+  return Math.floor(v / 2 ** (48 - n));
+}
+function birthday(n, salt) {
+  const seen = new Map();
+  for (let i = 0; ; i++) {
+    const m = `${salt}:${i}`, v = truncBits(sha256(m), n);
+    const prev = seen.get(v);
+    if (prev !== undefined) return { tries: i + 1, a: prev, b: m, v };
+    seen.set(v, m);
+  }
+}
+function initHash() {
+  const ok = toHex(sha256("abc")) === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  $("#hs-test").innerHTML = ok ? '<span class="pill ok">시험 벡터 SHA-256("abc") 일치</span>' : '<span class="pill bad">시험 벡터 불일치</span>';
+  const run = () => {
+    const a = sha256($("#hs-a").value), b = sha256($("#hs-b").value);
+    let diff = 0, cells = "";
+    for (let i = 0; i < 256; i++) { const d = ((a[i >> 3] ^ b[i >> 3]) >> (7 - (i & 7))) & 1; diff += d; cells += d ? '<i class="d"></i>' : "<i></i>"; }
+    $("#hs-grid").innerHTML = cells;
+    kv($("#hs-res"), [["H(메시지 1)", toHex(a)], ["H(메시지 2)", toHex(b)], ["달라진 비트", `<b>${diff}</b> / 256 (${(diff / 2.56).toFixed(1)}%)`]]);
+  };
+  ["#hs-a", "#hs-b"].forEach(s => $(s).addEventListener("input", run)); run();
+  const nEl = $("#bd-n"); const expect = n => 1.2533 * 2 ** (n / 2);
+  nEl.addEventListener("input", () => { $("#bd-nv").textContent = nEl.value; });
+  $("#bd-run").addEventListener("click", async e => {
+    const btn = e.currentTarget, n = +nEl.value, out = $("#bd-out"); btn.disabled = true; out.textContent = "해시 계산 중…";
+    const t0 = performance.now();
+    const r = await later(() => birthday(n, toHex(randBytes(4))));
+    btn.disabled = false;
+    out.textContent = `n = ${n}비트 · ${fmt(r.tries)}번째 시도에서 충돌 (${(performance.now() - t0).toFixed(0)}ms)\n기대값 ≈ ${fmt(Math.round(expect(n)))}, 전수 역상 공격이라면 ≈ ${fmt(2 ** n)}\n"${r.a}" 와 "${r.b}"\n→ 두 메시지의 해시 앞 ${n}비트가 똑같이 0x${r.v.toString(16).padStart(Math.ceil(n / 4), "0")}입니다.`;
+  });
+  $("#bd-many").addEventListener("click", async e => {
+    const btn = e.currentTarget, n = Math.min(+nEl.value, 28), out = $("#bd-out"); btn.disabled = true;
+    const tries = [];
+    for (let k = 0; k < 20; k++) { out.textContent = `반복 ${k + 1}/20…`; tries.push((await later(() => birthday(n, toHex(randBytes(4))))).tries); }
+    btn.disabled = false;
+    const avg = tries.reduce((s, x) => s + x, 0) / tries.length;
+    out.textContent = `n = ${n}비트, 20회 평균 ${fmt(Math.round(avg))}번 (최소 ${fmt(Math.min(...tries))}, 최대 ${fmt(Math.max(...tries))})\n이론값 √(π/2)·2^(n/2) ≈ ${fmt(Math.round(expect(n)))}  ·  비율 ${(avg / expect(n)).toFixed(2)}` + (+nEl.value > 28 ? "\n(반복 실험은 시간 때문에 n ≤ 28로 제한했습니다)" : "");
+  });
+}
+
+/* ══════════════════════ 8. 타원곡선 ══════════════════════ */
+const nmod = (a, m) => ((a % m) + m) % m;
+function ninv(a, p) { let [r0, r1, s0, s1] = [nmod(a, p), p, 1, 0]; while (r1) { const q = Math.floor(r0 / r1); [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; } return r0 === 1 ? nmod(s0, p) : null; }
+function isPrimeN(n) { if (n < 2) return false; for (let d = 2; d * d <= n; d++) if (n % d === 0) return false; return true; }
+function ecPoints(a, b, p) {
+  const roots = new Map();
+  for (let y = 0; y < p; y++) { const v = y * y % p; if (!roots.has(v)) roots.set(v, []); roots.get(v).push(y); }
+  const pts = [];
+  for (let x = 0; x < p; x++) for (const y of roots.get(nmod(x * x * x + a * x + b, p)) || []) pts.push([x, y]);
+  return pts;
+}
+function ecAdd(P, Q, a, p, explain) {
+  if (!P) return { R: Q, why: "𝒪 + Q = Q" };
+  if (!Q) return { R: P, why: "P + 𝒪 = P" };
+  const [x1, y1] = P, [x2, y2] = Q;
+  if (x1 === x2 && nmod(y1 + y2, p) === 0) return { R: null, why: "x₁ = x₂ 이고 y₁ = −y₂ → P + Q = 𝒪 (세로선)" };
+  let num, den, kind;
+  if (x1 === x2 && y1 === y2) { num = nmod(3 * x1 * x1 + a, p); den = nmod(2 * y1, p); kind = "접선(P = Q)"; }
+  else { num = nmod(y2 - y1, p); den = nmod(x2 - x1, p); kind = "할선(P ≠ Q)"; }
+  const inv = ninv(den, p), lam = num * inv % p;
+  const x3 = nmod(lam * lam - x1 - x2, p), y3 = nmod(lam * (x1 - x3) - y1, p);
+  return { R: [x3, y3], why: explain ? `${kind}\nλ = ${num} · ${den}⁻¹ = ${num} · ${inv} ≡ ${lam} (mod ${p})\nx₃ = λ² − x₁ − x₂ = ${lam}² − ${x1} − ${x2} ≡ ${x3}\ny₃ = λ(x₁ − x₃) − y₁ = ${lam}·(${x1} − ${x3}) − ${y1} ≡ ${y3}` : "" };
+}
+function ecMul(k, P, a, p) { // 더블-앤드-애드, 단계 기록
+  const steps = []; let R = null;
+  for (const bit of k.toString(2)) { R = ecAdd(R, R, a, p).R; let line = `비트 ${bit}: 2배 → ${ptStr(R)}`; if (bit === "1") { R = ecAdd(R, P, a, p).R; line += `, +P → ${ptStr(R)}`; } steps.push(line); }
+  return { R, steps };
+}
+function ecOrder(P, a, p) { let R = P, n = 1; const orbit = [P]; while (R) { R = ecAdd(R, P, a, p).R; n++; orbit.push(R); if (n > 4 * p) break; } return { n, orbit }; }
+const ptStr = P => (P ? `(${P[0]}, ${P[1]})` : "𝒪");
+function initECC() {
+  const cv = $("#ec-cv"), ctx = cv.getContext("2d");
+  let st = { a: 2, b: 3, p: 97, pts: [], P: null, Q: null }, pickQ = false;
+  const readCurve = () => {
+    const a = parseInt($("#ec-a").value, 10), b = parseInt($("#ec-b").value, 10), p = parseInt($("#ec-p").value, 10);
+    const info = $("#ec-info");
+    if (![a, b, p].every(Number.isFinite)) { info.textContent = "a, b, p에 정수를 넣어 주세요."; return false; }
+    if (!isPrimeN(p) || p < 3 || p > 251) { info.textContent = "p는 3 이상 251 이하의 소수여야 합니다."; return false; }
+    if (nmod(4 * a * a * a + 27 * b * b, p) === 0) { info.innerHTML = '<span class="pill bad">4a³ + 27b² ≡ 0: 특이 곡선이라 군이 되지 않습니다</span>'; return false; }
+    const pts = ecPoints(a, b, p), N = pts.length + 1;
+    st = { a: nmod(a, p), b: nmod(b, p), p, pts, P: pts[0] || null, Q: null }; pickQ = false;
+    // 기본 P는 위수가 가장 큰 점
+    let best = 0; for (const pt of pts) { const o = ecOrder(pt, st.a, p).n; if (o > best) { best = o; st.P = pt; } }
+    info.textContent = `#E = ${N} (점 ${pts.length}개 + 𝒪) · 하세 범위 ${Math.ceil(p + 1 - 2 * Math.sqrt(p))}–${Math.floor(p + 1 + 2 * Math.sqrt(p))}`;
+    return true;
+  };
+  const geom = () => { const W = cv.width, pad = 34, s = (W - pad - 12) / st.p; return { W, pad, s, X: x => pad + (x + 0.5) * s, Y: y => W - pad - (y + 0.5) * s }; };
+  const draw = () => {
+    const dpr = window.devicePixelRatio || 1, cssW = cv.clientWidth || 600;
+    cv.width = cv.height = Math.round(cssW * dpr);
+    const { W, pad, s, X, Y } = geom(), ink = cssVar("--ink"), muted = cssVar("--muted"), line = cssVar("--line"), acc = cssVar("--accent"), hot = cssVar("--hot");
+    ctx.clearRect(0, 0, W, W);
+    ctx.strokeStyle = line; ctx.lineWidth = 1;
+    ctx.strokeRect(pad, 12, W - pad - 12, W - pad - 12);
+    ctx.fillStyle = muted; ctx.font = `${11 * dpr}px ${cssVar("--font-mono")}`;
+    const tick = st.p <= 31 ? 5 : st.p <= 101 ? 10 : 50;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    for (let v = 0; v < st.p; v += tick) ctx.fillText(v, X(v), W - pad + 6);
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let v = 0; v < st.p; v += tick) ctx.fillText(v, pad - 6, Y(v));
+    ctx.strokeStyle = line; ctx.setLineDash([3 * dpr, 4 * dpr]); ctx.beginPath(); ctx.moveTo(pad, Y((st.p - 1) / 2)); ctx.lineTo(W - 12, Y((st.p - 1) / 2)); ctx.stroke(); ctx.setLineDash([]);
+    const r = Math.max(2 * dpr, Math.min(5 * dpr, s * 0.32));
+    const dot = (pt, color, rad) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(X(pt[0]), Y(pt[1]), rad, 0, Math.PI * 2); ctx.fill(); };
+    for (const pt of st.pts) dot(pt, muted, r);
+    const R = st.P && st.Q !== null ? ecAdd(st.P, st.Q, st.a, st.p).R : null;
+    if (R) { dot(R, hot, r * 2.1); }
+    if (st.Q) { ctx.strokeStyle = ink; ctx.lineWidth = 2 * dpr; ctx.beginPath(); ctx.arc(X(st.Q[0]), Y(st.Q[1]), r * 2.4, 0, Math.PI * 2); ctx.stroke(); dot(st.Q, ink, r * 1.4); }
+    if (st.P) dot(st.P, acc, r * 1.8);
+  };
+  const report = () => {
+    const { P, Q, a, p } = st;
+    const ordP = P ? ecOrder(P, a, p) : null;
+    kv($("#ec-sel"), [["곡선", `y² = x³ + ${a}x + ${st.b} (mod ${p})`], ["P", ptStr(P) + (ordP ? ` · 위수 ${ordP.n}` : "")], ["Q", Q ? ptStr(Q) : "—"], ["−P", P ? ptStr([P[0], nmod(-P[1], p)]) : "—"]]);
+    if (P && Q) { const r = ecAdd(P, Q, a, p, true); $("#ec-add").textContent = `${ptStr(P)} + ${ptStr(Q)} = ${ptStr(r.R)}\n${r.why}` + (r.R ? `\n검산: y₃² ≡ ${r.R[1] * r.R[1] % p},  x₃³ + ax₃ + b ≡ ${nmod(r.R[0] ** 3 + a * r.R[0] + st.b, p)}` : ""); }
+    else $("#ec-add").textContent = "점을 눌러 P를 고르고, 한 번 더 눌러 Q를 고르세요. 같은 점을 두 번 누르면 2P를 계산합니다.";
+    // 스칼라 곱
+    const k = parseInt($("#ec-k").value, 10);
+    if (P && Number.isFinite(k) && k > 0 && k < 1e6) { const m = ecMul(k, P, a, p); $("#ec-mul").textContent = `k = ${k} = ${k.toString(2)}₂\n${m.steps.join("\n")}\n${k}·P = ${ptStr(m.R)}`; }
+    else $("#ec-mul").textContent = "1 이상 1,000,000 미만의 k를 넣어 주세요.";
+    $("#ec-orbit").innerHTML = ordP ? ordP.orbit.map((pt, i) => `<span class="${i === 0 ? "g" : ""}">${i + 1}P=${ptStr(pt)}</span>`).join("") : "";
+    // ECDH
+    const da = parseInt($("#ec-da").value, 10), db = parseInt($("#ec-db").value, 10);
+    if (P && [da, db].every(v => Number.isFinite(v) && v > 0 && v < 1e6)) {
+      const A = ecMul(da, P, a, p).R, B = ecMul(db, P, a, p).R, KA = A ? ecMul(da, B, a, p).R : null, KB = B ? ecMul(db, A, a, p).R : null;
+      const same = ptStr(KA) === ptStr(KB);
+      kv($("#ec-dh"), [["G", ptStr(P)], ["A = a·G", ptStr(A)], ["B = b·G", ptStr(B)], ["앨리스 a·B", ptStr(KA)], ["밥 b·A", ptStr(KB)],
+        ["", same ? '<span class="pill ok">공유 점 일치</span>' : '<span class="pill bad">불일치</span>']]);
+    } else kv($("#ec-dh"), [["", "a, b에 양의 정수를 넣어 주세요."]]);
+  };
+  const refresh = () => { draw(); report(); };
+  const onCurve = () => { if (readCurve()) refresh(); else { st.pts = []; st.P = st.Q = null; draw(); report(); } };
+  cv.addEventListener("click", e => {
+    if (!st.pts.length) return;
+    const rect = cv.getBoundingClientRect(), k = cv.width / rect.width, mx = (e.clientX - rect.left) * k, my = (e.clientY - rect.top) * k;
+    const { X, Y, s } = geom(); let best = null, bd = Infinity;
+    for (const pt of st.pts) { const d = Math.hypot(X(pt[0]) - mx, Y(pt[1]) - my); if (d < bd) { bd = d; best = pt; } }
+    if (!best || bd > Math.max(14 * (window.devicePixelRatio || 1), s * 1.5)) return;
+    if (pickQ) st.Q = best; else { st.P = best; st.Q = null; }
+    pickQ = !pickQ;
+    refresh();
+  });
+  ["#ec-a", "#ec-b", "#ec-p"].forEach(s => $(s).addEventListener("change", onCurve));
+  ["#ec-k", "#ec-da", "#ec-db"].forEach(s => $(s).addEventListener("input", report));
+  window.addEventListener("resize", () => { if (!$("[data-mod=ecc]").hidden) draw(); });
+  onCurve();
+  return draw;
+}
+
+/* ══════════════════════ 탐색 ══════════════════════ */
+const mods = [...document.querySelectorAll(".mod")];
+const redraw = {};
+const inited = new Set();
+const initFns = { classic: initClassic, modular: initModular, rsa: initRSA, dh: initDH, aes: initAES, modes: initModes, hash: initHash, ecc: initECC };
+function show(id) {
+  if (!initFns[id]) id = "classic";
+  mods.forEach(m => { m.hidden = m.dataset.mod !== id; });
+  document.querySelectorAll("#nav button").forEach(b => b.setAttribute("aria-current", String(b.dataset.mod === id)));
+  if (!inited.has(id)) { inited.add(id); redraw[id] = initFns[id](); }
+  else if (typeof redraw[id] === "function" && id === "ecc") redraw[id]();
+  try { localStorage.setItem("cryptolab.tab", id); } catch (_) {}
+  if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+}
+$("#nav").innerHTML = mods.map((m, i) => `<button type="button" data-mod="${m.dataset.mod}"><span class="no">${String(i + 1).padStart(2, "0")}</span><span>${m.dataset.title}</span></button>`).join("");
+$("#nav").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { show(b.dataset.mod); window.scrollTo({ top: 0 }); } });
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+const themeRedraw = () => { if (inited.has("ecc") && !$("[data-mod=ecc]").hidden) redraw.ecc(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeRedraw);
+new MutationObserver(themeRedraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+let start = location.hash.slice(1);
+if (!initFns[start]) { try { start = localStorage.getItem("cryptolab.tab") || "classic"; } catch (_) { start = "classic"; } }
+show(start);
+</script>
