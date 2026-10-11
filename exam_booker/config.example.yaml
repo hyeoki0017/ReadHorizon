@@ -1,12 +1,27 @@
-# 자격증 시험 접수 도우미 설정 예시
-# 1) 이 파일을 config.yaml로 복사  2) 사이트·희망 조건·선택자 수정  3) python -m exam_booker config.yaml --check
-# ※ 아이디·비밀번호·주민번호 등 개인정보는 여기에 적지 않습니다. 로그인은 실행 후 브라우저에서 직접 합니다.
+# 자격증 시험 1인 접수 도우미 설정 예시
+# 1) 이 파일을 config.yaml로 복사  2) 사이트·희망 조건·선택자 수정  3) python -m exam_booker run config.yaml --check
+# ※ 이 파일에는 아이디·비밀번호·주민번호를 적지 않습니다(적으면 오류로 거부).
+#    로그인 정보는 'python -m exam_booker vault add qnet'으로 암호화 보관함에 따로 저장합니다.
 
-# 로그인 페이지 (생략하면 apply_url을 엽니다)
-# ※ 아래 주소는 자리표시용입니다. 실제 접수 사이트에서 로그인·원서접수 화면의 주소를 복사해 넣으세요.
+# 사이트 프리셋: qnet | kca | kisa  (로그인 화면 기본 선택자·대기열 감지를 채워 줌, 아래 값이 우선)
+site: qnet
+
+# 로그인 페이지 / 원서접수 페이지
+# ※ 자리표시용 주소입니다. 실제 화면의 주소창 URL을 복사해 넣으세요.
 login_url: https://www.q-net.or.kr/
-# 원서접수 페이지 — 접수 버튼이 있는 화면 (주소창의 URL 그대로)
 apply_url: https://www.q-net.or.kr/
+
+# 자동 로그인 (빼거나 enabled: false면 직접 로그인)
+login:
+  credential: qnet          # 보관함 항목 이름 (vault add 할 때 쓴 이름)
+  vault: credentials.enc    # 암호화 보관함 파일
+  lead_minutes: 5           # 접수 몇 분 전에 로그인할지(너무 이르면 세션 만료)
+  timeout_seconds: 30       # 로그인 성공 표시를 기다릴 시간. 실패해도 재시도하지 않음(계정 잠금 방지)
+  # 프리셋 선택자가 안 맞으면 inspect로 확인해 덮어쓰기:
+  # id_field: "#userId"
+  # pw_field: "#userPw"
+  # submit_button: "#btnLogin"
+  # logged_in_marker: "a:has-text('로그아웃')"
 
 # 접수 시작 시각 (시간대를 안 적으면 한국 시간)
 open_at: "2026-11-02 10:00:00"

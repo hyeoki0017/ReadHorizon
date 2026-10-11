@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from .sites import SITES, apply_preset
+
 KST = timezone(timedelta(hours=9))
 
 # 사이트에 부담을 주거나 차단당하지 않도록 새로고침 간격의 하한을 둔다.
@@ -49,6 +51,20 @@ class Selectors:
 
 
 @dataclass(frozen=True)
+class LoginConfig:
+    """자동 로그인 설정. 아이디·비밀번호 자체는 여기 없고, 암호화 보관함의 항목 이름만 가리킨다."""
+
+    credential: str
+    id_field: str
+    pw_field: str
+    submit_button: str = ""
+    logged_in_marker: str = ""
+    vault: str = "credentials.enc"
+    lead_minutes: float = 5.0
+    timeout_seconds: float = 30.0
+
+
+@dataclass(frozen=True)
 class Config:
     login_url: str
     apply_url: str
@@ -62,6 +78,8 @@ class Config:
     auto_confirm: bool = False
     profile_dir: str = "browser_profile"
     sync_server_time: bool = True
+    login: LoginConfig | None = None
+    site: str = ""
     extra: dict = field(default_factory=dict)
 
 
@@ -90,6 +108,10 @@ def _str_tuple(value, name: str) -> tuple[str, ...]:
 def parse_config(raw: dict) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError("설정 파일 최상위는 키-값 형태여야 합니다.")
+    try:
+        raw = apply_preset(raw)
+    except KeyError as e:
+        raise ConfigError(f"알 수 없는 site: {e.args[0]!r} (가능: {', '.join(SITES)})") from None
 
     for key in ("apply_url", "open_at", "preferences", "selectors"):
         if key not in raw:
@@ -133,7 +155,11 @@ def parse_config(raw: dict) -> Config:
     if auto_confirm and not selectors.confirm_button:
         raise ConfigError("auto_confirm을 켜려면 selectors.confirm_button이 필요합니다.")
 
+    login = _parse_login(raw.get("login"))
+
     return Config(
+        login=login,
+        site=str(raw.get("site") or ""),
         login_url=str(raw.get("login_url") or raw["apply_url"]),
         apply_url=str(raw["apply_url"]),
         open_at=_parse_open_at(raw["open_at"]),
@@ -146,6 +172,37 @@ def parse_config(raw: dict) -> Config:
         auto_confirm=auto_confirm,
         profile_dir=str(raw.get("profile_dir", "browser_profile")),
         sync_server_time=bool(raw.get("sync_server_time", True)),
+    )
+
+
+def _parse_login(value) -> LoginConfig | None:
+    if value is None or value is False:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigError("login은 키-값 형태여야 합니다.")
+    if value.get("enabled") is False:
+        return None
+    for key in ("credential", "id_field", "pw_field"):
+        if not value.get(key):
+            raise ConfigError(f"login.{key}가 필요합니다.")
+    for key in ("username", "password", "user_id", "id", "pw", "passwd", "secret"):
+        if key in value:
+            raise ConfigError(
+                f"login.{key}: 설정 파일에 아이디·비밀번호를 적지 마세요. "
+                "'python -m exam_booker vault add <이름>'으로 암호화 보관함에 저장합니다."
+            )
+    lead = float(value.get("lead_minutes", 5.0))
+    if lead < 0:
+        raise ConfigError("login.lead_minutes는 0 이상이어야 합니다.")
+    return LoginConfig(
+        credential=str(value["credential"]),
+        id_field=str(value["id_field"]),
+        pw_field=str(value["pw_field"]),
+        submit_button=str(value.get("submit_button") or ""),
+        logged_in_marker=str(value.get("logged_in_marker") or ""),
+        vault=str(value.get("vault") or "credentials.enc"),
+        lead_minutes=lead,
+        timeout_seconds=float(value.get("timeout_seconds", 30.0)),
     )
 
 

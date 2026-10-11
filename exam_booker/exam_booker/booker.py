@@ -1,7 +1,9 @@
 """브라우저 자동 조작 (Playwright).
 
 원칙
-- 로그인·보안문자(CAPTCHA)·대기열은 사람이 처리한다. 감지되면 멈추고 알린다(우회하지 않음).
+- 로그인: 암호화 보관함의 아이디·비밀번호로 자동 입력(1회만 시도 — 계정 잠금 방지).
+  실패하거나 자동 로그인 설정이 없으면 사람이 직접 로그인한다.
+- 보안문자(CAPTCHA)·대기열·추가 인증은 사람이 처리한다. 감지되면 멈추고 알린다(우회하지 않음).
 - 새로고침 간격은 설정 하한(1초) 이상만 허용한다.
 - 최종 접수 확정·결제는 기본값으로 사람이 직접 누른다(auto_confirm: false).
 - 사이트의 확인창(confirm/alert)은 '확인'으로 처리하고 내용을 기록한다.
@@ -15,13 +17,16 @@ from collections.abc import Callable
 from datetime import timedelta
 
 from playwright.sync_api import BrowserContext, Page
+from playwright.sync_api import Error as PWError
 from playwright.sync_api import TimeoutError as PWTimeout
 
 from . import clock
 from .config import Config
 from .matching import pick_slot
+from .vault import Credential, mask
 
 Log = Callable[[str], None]
+CredentialProvider = Callable[[], Credential]
 
 
 def alert(log: Log, msg: str) -> None:
@@ -37,8 +42,10 @@ class Booker:
         log: Log = print,
         ask: Callable[[str], str] = input,
         sleep: Callable[[float], None] = time.sleep,
+        credentials: CredentialProvider | None = None,
     ):
         self.cfg = cfg
+        self.credentials = credentials
         self.context = context
         self.page = page
         self.log = log
@@ -56,10 +63,71 @@ class Booker:
     def _watch(self, page: Page) -> None:
         page.on("dialog", self._on_dialog)
 
+    @property
+    def auto_login_enabled(self) -> bool:
+        return self.cfg.login is not None and self.credentials is not None
+
     def login(self) -> None:
-        self._watch(self.page)
+        if self.auto_login_enabled and self.auto_login():
+            return
         self.page.goto(self.cfg.login_url)
-        self.ask("\n브라우저 창에서 직접 로그인한 뒤, 여기서 Enter를 누르세요 (비밀번호는 저장하지 않습니다) ▶ ")
+        self.ask("\n브라우저 창에서 직접 로그인한 뒤, 여기서 Enter를 누르세요 ▶ ")
+
+    def _is_logged_in(self, page: Page) -> bool:
+        marker = self.cfg.login.logged_in_marker if self.cfg.login else ""
+        if not marker:
+            return False
+        try:
+            return page.locator(marker).first.is_visible()
+        except Exception:  # noqa: BLE001 - 잘못된 선택자
+            return False
+
+    def auto_login(self) -> bool:
+        """보관함 정보로 로그인 폼을 채워 1회 시도. 성공 여부를 돌려준다(실패 시 수동 로그인으로 넘어감)."""
+        lc = self.cfg.login
+        page = self.page
+        page.goto(self.cfg.login_url, wait_until="domcontentloaded")
+        if self._is_logged_in(page):
+            self.log("이미 로그인돼 있습니다.")
+            return True
+        self.wait_blockers_cleared(page)
+        try:
+            cred = self.credentials()
+        except Exception as e:  # noqa: BLE001
+            alert(self.log, f"로그인 정보를 불러오지 못했습니다: {e}")
+            return False
+        try:
+            id_box = page.locator(lc.id_field).first
+            pw_box = page.locator(lc.pw_field).first
+            id_box.wait_for(state="visible", timeout=10000)
+            id_box.fill(cred.username)
+            pw_box.fill(cred.password)
+            self.log(f"자동 로그인 시도: {mask(cred.username)}")
+            submit = page.locator(lc.submit_button).first if lc.submit_button else None
+            if submit is not None and submit.count() and submit.is_visible():
+                submit.click()
+            else:
+                pw_box.press("Enter")
+        except PWError:
+            alert(self.log, "로그인 입력칸을 찾지 못했습니다(login.id_field / pw_field 확인).")
+            return False
+        finally:
+            del cred  # 평문 참조를 바로 끊는다
+
+        deadline = time.time() + lc.timeout_seconds
+        while time.time() < deadline:
+            page = self._active_page()
+            if self._is_logged_in(page):
+                self.log("로그인 완료.")
+                return True
+            if self._visible_blocker(page):
+                self.wait_blockers_cleared(page)  # 보안문자·추가 인증은 사람이
+                deadline = time.time() + lc.timeout_seconds
+            self.sleep(0.5)
+        if not lc.logged_in_marker:
+            self.log("로그인 확인 표시(login.logged_in_marker)가 없어 성공 여부를 알 수 없습니다.")
+        alert(self.log, "자동 로그인을 확인하지 못했습니다. 계정 잠금 방지를 위해 다시 시도하지 않습니다.")
+        return False
 
     def wait_for_open(self) -> None:
         offset = 0.0
@@ -188,13 +256,22 @@ class Booker:
             pass
 
     # ---- 전체 흐름 -------------------------------------------------------
+    def wait_for_login_time(self) -> None:
+        """자동 로그인은 접수 직전에 해야 세션이 만료되지 않는다."""
+        lead = self.cfg.login.lead_minutes if self.cfg.login else 0
+        at = self.cfg.open_at - timedelta(minutes=lead)
+        if clock.seconds_until(at) > 0:
+            self.log(f"접수 {lead:g}분 전({at:%H:%M:%S})에 자동 로그인합니다. 창을 닫지 말고 기다려 주세요.")
+            clock.wait_until(at, on_tick=lambda s: self.log(f"  로그인까지 {s:,.0f}초"), sleep=self.sleep)
+
     def run(self, skip_login: bool = False, skip_wait: bool = False) -> bool:
+        self._watch(self.page)
         if not skip_login:
+            if self.auto_login_enabled and not skip_wait:
+                self.wait_for_login_time()
             self.login()
         if not skip_wait:
             self.wait_for_open()
-        if skip_login:
-            self._watch(self.page)
         deadline = time.time() + self.cfg.give_up_after_minutes * 60
         self.page.goto(self.cfg.apply_url, wait_until="domcontentloaded")
         if not self.click_apply_when_open(deadline):
