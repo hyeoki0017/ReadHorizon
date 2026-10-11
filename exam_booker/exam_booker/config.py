@@ -80,6 +80,8 @@ class Config:
     sync_server_time: bool = True
     login: LoginConfig | None = None
     site: str = ""
+    # 자동 모드 허용 근거(기관 서면 답변 날짜·번호 등). 비어 있으면 실제 사이트에서 자동 모드 실행 거부
+    site_permission: str = ""
     extra: dict = field(default_factory=dict)
 
 
@@ -160,6 +162,7 @@ def parse_config(raw: dict) -> Config:
     return Config(
         login=login,
         site=str(raw.get("site") or ""),
+        site_permission=str(raw.get("site_permission") or "").strip(),
         login_url=str(raw.get("login_url") or raw["apply_url"]),
         apply_url=str(raw["apply_url"]),
         open_at=_parse_open_at(raw["open_at"]),
@@ -204,6 +207,12 @@ def _parse_login(value) -> LoginConfig | None:
         lead_minutes=lead,
         timeout_seconds=float(value.get("timeout_seconds", 30.0)),
     )
+
+
+def is_practice_url(url: str) -> bool:
+    """모의 사이트(파일·내 PC)인지 — 연습에는 허용 근거가 필요 없다."""
+    u = url.lower()
+    return u.startswith("file://") or u.startswith(("http://localhost", "http://127.0.0.1"))
 
 
 def load_config(path: str | Path) -> Config:

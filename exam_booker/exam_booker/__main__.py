@@ -18,7 +18,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .config import ConfigError, load_config
+from .config import ConfigError, is_practice_url, load_config
 from .sites import SITES
 from .vault import Credential, Vault, VaultError, mask
 
@@ -112,6 +112,17 @@ def cmd_run(args) -> int:
     else:
         print("로그인: 직접")
     print(f"새로고침 간격 {cfg.poll_interval:g}초, 최종 확정 {'자동' if cfg.auto_confirm else '직접'}")
+    practice = is_practice_url(cfg.apply_url) and is_practice_url(cfg.login_url)
+    if cfg.site_permission:
+        print(f"자동 모드 허용 근거: {cfg.site_permission}")
+    elif not practice:
+        print(
+            "\n[자동 모드 잠김] 실제 접수 사이트에서 자동 로그인·자동 클릭을 하려면 기관의 허용 근거가 필요합니다.\n"
+            "  - 기관에 서면 질의 후 답변 날짜·번호를 config의 site_permission에 적으세요.\n"
+            "  - 허용 전에는 크롬 확장 '접수 보조 모드'(extension/)를 쓰세요. 클릭·입력 없이 빈자리만 표시합니다.",
+            file=sys.stderr,
+        )
+        return 2
     if args.check:
         return 0
 

@@ -186,10 +186,33 @@ def test_cleanup_and_password_saving_disabled(tmp_path, monkeypatch):
     assert not vp.exists()
 
 
-def test_run_refuses_auto_login_with_pw_debug(tmp_path, monkeypatch):
+def test_run_refuses_auto_login_with_pw_debug(tmp_path, monkeypatch, capsys):
     from exam_booker import __main__ as cli
 
     cfgp = tmp_path / "c.yaml"
-    cfgp.write_text(Path(__file__).resolve().parents[1].joinpath("config.example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    example = Path(__file__).resolve().parents[1].joinpath("config.example.yaml").read_text(encoding="utf-8")
+    cfgp.write_text(example.replace('site_permission: ""', 'site_permission: "테스트 허용"'), encoding="utf-8")
     monkeypatch.setenv("DEBUG", "pw:api")
     assert cli.main(["run", str(cfgp)]) == 2
+    assert "디버그" in capsys.readouterr().err
+
+
+def test_auto_mode_locked_without_site_permission(tmp_path, capsys):
+    from exam_booker import __main__ as cli
+
+    example = Path(__file__).resolve().parents[1].joinpath("config.example.yaml").read_text(encoding="utf-8")
+    real = tmp_path / "real.yaml"
+    real.write_text(example, encoding="utf-8")
+    assert cli.main(["run", str(real), "--check"]) == 2
+    assert "자동 모드 잠김" in capsys.readouterr().err
+
+    allowed = tmp_path / "allowed.yaml"
+    allowed.write_text(example.replace('site_permission: ""', 'site_permission: "기관 답변 2026-10-20"'), encoding="utf-8")
+    assert cli.main(["run", str(allowed), "--check"]) == 0
+
+    practice = tmp_path / "practice.yaml"
+    mock = Path(__file__).resolve().parents[1].joinpath("mock", "mock_site.html").as_uri()
+    practice.write_text(
+        example.replace("https://www.q-net.or.kr/", mock), encoding="utf-8"
+    )
+    assert cli.main(["run", str(practice), "--check"]) == 0
