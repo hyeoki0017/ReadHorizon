@@ -1,0 +1,47 @@
+# 자격증 시험 접수 도우미 설정 예시
+# 1) 이 파일을 config.yaml로 복사  2) 사이트·희망 조건·선택자 수정  3) python -m exam_booker config.yaml --check
+# ※ 아이디·비밀번호·주민번호 등 개인정보는 여기에 적지 않습니다. 로그인은 실행 후 브라우저에서 직접 합니다.
+
+# 로그인 페이지 (생략하면 apply_url을 엽니다)
+# ※ 아래 주소는 자리표시용입니다. 실제 접수 사이트에서 로그인·원서접수 화면의 주소를 복사해 넣으세요.
+login_url: https://www.q-net.or.kr/
+# 원서접수 페이지 — 접수 버튼이 있는 화면 (주소창의 URL 그대로)
+apply_url: https://www.q-net.or.kr/
+
+# 접수 시작 시각 (시간대를 안 적으면 한국 시간)
+open_at: "2026-11-02 10:00:00"
+lead_seconds: 2            # 몇 초 전부터 시도할지
+poll_interval: 1.0         # 새로고침 간격(초). 1초 미만은 허용하지 않습니다(차단 방지).
+give_up_after_minutes: 30  # 이 시간 안에 못 잡으면 중단
+
+# 희망 조건 — 위에서부터 우선순위. 화면에 보이는 글자 일부를 적으면 됩니다.
+# 날짜는 2026-11-21 / 2026.11.21 / 11월 21일 모두 같은 것으로 인식합니다.
+# 비워 둔 항목은 '아무거나 괜찮음'입니다.
+preferences:
+  - { venue: "상암고", date: "2026-11-21", time: "09:00" }
+  - { venue: "상암고", date: "2026-11-21" }
+  - { venue: "개포고" }
+  - { venue: "서울" }
+
+# 이 글자가 들어 있는 행은 자리가 없는 것으로 봅니다(잔여 0, 0석도 자동 인식).
+full_keywords: ["마감", "매진", "불가"]
+
+# 최종 접수(결제) 버튼을 자동으로 누를지. 기본은 false — 자리 선택까지만 자동, 확정은 직접.
+auto_confirm: false
+
+# 로그인 상태가 저장되는 폴더(내 PC에만 저장, 커밋 금지)
+profile_dir: browser_profile
+
+# ── 화면 구조(CSS 선택자) ─────────────────────────────────────
+# 사이트마다 다르므로 브라우저 개발자도구(F12)로 확인해 맞춰 주세요.
+# 아래 값은 mock/mock_site.html(모의 사이트) 기준 예시입니다.
+selectors:
+  apply_button: "#apply"                 # 접수 버튼 (비활성 → 활성 될 때까지 새로고침)
+  before_slots:                          # 일정 목록을 띄우기 전 차례로 누를 것(지역 조회 등). 없으면 비움
+    - "#search"
+  slot_row: "#slots tbody tr.slot"       # 시험일·시간·시험장이 한 줄씩 나오는 행
+  slot_choose: "button.choose"           # 그 행 안의 '선택' 버튼
+  confirm_button: "#final"               # 최종 접수 버튼 (자동 확정 안 해도 빨간 테두리로 표시)
+  blockers:                              # 보이면 멈추고 사람에게 넘길 화면(보안문자·대기열)
+    - "#captcha"
+    - "#NetFunnel_Loading_Popup"
