@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>원서접수 - 장소선택</title>
+<meta http-equiv="refresh" content="5;url=https://www.q-net.or.kr/">
+<link rel="stylesheet" href="https://www.q-net.or.kr/css/common.css">
+<script src="https://www.q-net.or.kr/js/netfunnel.js"></script>
+<script>fetch("https://www.q-net.or.kr/rcv/apply.do", {method: "POST"});</script>
+</head>
+<body onload="startTimer()">
+<!-- 테스트용 가상 저장 화면(실제 사이트 HTML 아님). 개인정보는 모두 가짜 값 -->
+<div class="top">홍길동님 환영합니다 | 연락처 010-1234-5678 | test@example.com</div>
+<form name="frm" action="javascript:void(0)">
+  <input type="hidden" name="sessionToken" value="SECRET-TOKEN-123">
+  <input type="text" name="userNm" value="홍길동">
+  <p>성명: 홍길동 / 생년월일: 900101</p>
+  <a href="javascript:goApply()">원서접수</a>
+</form>
+<img src="https://www.q-net.or.kr/img/logo.png" alt="로고">
+<table class="tbl_type1 list"><thead><tr><th>시험일자</th><th>시간</th><th>시험장</th><th>잔여석</th><th>선택</th></tr></thead>
+<tbody>
+  <tr><td>2026.11.21(토)</td><td>09:00</td><td>서울 마포구 상암고등학교</td><td>0</td><td><a href="#" onclick="sel(1)">선택</a></td></tr>
+  <tr><td>2026.11.21(토)</td><td>13:00</td><td>서울 마포구 상암고등학교</td><td>잔여 4</td><td><a href="#" onclick="sel(2)">선택</a></td></tr>
+  <tr><td>2026.11.22(일)</td><td>09:00</td><td>서울 강남구 개포고등학교</td><td>마감</td><td><a href="#">선택</a></td></tr>
+</tbody></table>
+<table class="notice"><tbody><tr><td>유의사항: 접수 후 결제를 완료해야 합니다.</td></tr></tbody></table>
+</body></html>

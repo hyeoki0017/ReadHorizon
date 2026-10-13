@@ -67,7 +67,31 @@
       });
   }
 
-  const api = { normalize, keywords, label, rowMatches, isFull, pickSlot, rankRows, parsePrefs };
+  // [브라우저 전용] 표 머리글에서 '잔여·여석·남은' 칸을 찾아 숫자만 적힌 칸을 '잔여 N'으로 풀어 쓴다.
+  // 예: 잔여석 칸에 '0'만 있으면 행 텍스트만으로는 마감을 알 수 없기 때문.
+  const SEAT_HEADER = /잔여|여석|남은/;
+  const seatColCache = new WeakMap();
+
+  function seatColumn(table) {
+    if (!table) return -1;
+    if (seatColCache.has(table)) return seatColCache.get(table);
+    const ths = Array.from(table.querySelectorAll("thead th, thead td, tr:first-child th"));
+    const th = ths.find((h) => SEAT_HEADER.test(h.textContent || ""));
+    const idx = th ? th.cellIndex : -1;
+    seatColCache.set(table, idx);
+    return idx;
+  }
+
+  function rowTextWithSeats(tr) {
+    const base = (tr.innerText || tr.textContent || "").replace(WS, " ").trim();
+    const idx = seatColumn(tr.closest("table"));
+    const cell = idx >= 0 ? tr.cells[idx] : null;
+    if (!cell) return base;
+    const m = (cell.innerText || cell.textContent || "").trim().match(/^(\d+)/);
+    return m ? `${base} 잔여 ${Number(m[1])}` : base;
+  }
+
+  const api = { normalize, keywords, label, rowMatches, isFull, pickSlot, rankRows, parsePrefs, rowTextWithSeats };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ExamMatch = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

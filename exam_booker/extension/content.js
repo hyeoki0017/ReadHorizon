@@ -87,8 +87,8 @@
   const visible = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
 
   function rowText(tr) {
-    // 입력칸 값은 읽지 않는다(innerText는 input 값을 포함하지 않음)
-    return (tr.innerText || "").replace(/\s+/g, " ").trim();
+    // 입력칸 값은 읽지 않는다(innerText는 input 값을 포함하지 않음). 잔여석 칸 숫자는 '잔여 N'으로 보강
+    return M.rowTextWithSeats(tr);
   }
 
   function findBlocker() {

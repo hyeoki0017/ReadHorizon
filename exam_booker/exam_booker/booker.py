@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import Path
 
 from playwright.sync_api import BrowserContext, Page
 from playwright.sync_api import Error as PWError
@@ -27,6 +28,15 @@ from .vault import Credential, mask
 
 Log = Callable[[str], None]
 CredentialProvider = Callable[[], Credential]
+
+
+_MATCHING_JS = (Path(__file__).resolve().parents[1] / "extension" / "matching.js").read_text(encoding="utf-8")
+# 확장 프로그램과 같은 규칙으로 행 텍스트를 만든다(잔여석 칸의 숫자만 있는 경우 '잔여 N'으로 보강)
+_ROW_TEXTS_FN = "rs => {" + _MATCHING_JS + "; return rs.map(r => globalThis.ExamMatch.rowTextWithSeats(r)); }"
+
+
+def row_texts(rows) -> list[str]:
+    return [t.strip() for t in rows.evaluate_all(_ROW_TEXTS_FN)]
 
 
 def alert(log: Log, msg: str) -> None:
@@ -215,7 +225,7 @@ class Booker:
                 self.sleep(self.cfg.poll_interval)
                 continue
             rows = page.locator(s.slot_row)
-            texts = [t.strip() for t in rows.all_inner_texts()]
+            texts = row_texts(rows)
             picked = pick_slot(texts, self.cfg.preferences, self.cfg.full_keywords)
             if picked is None:
                 if rounds == 1:

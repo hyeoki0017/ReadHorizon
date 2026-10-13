@@ -6,6 +6,9 @@
   python -m exam_booker inspect https://...                 화면 구조(선택자) 확인
   python -m exam_booker sites                               사이트 프리셋 목록
   python -m exam_booker cleanup [--vault-too]               접수 후 로그인 흔적 삭제
+  python -m exam_booker check-page 저장화면.html --prefs "상암고|2026-11-21"
+                                                            저장한 화면으로 보조 모드 오프라인 점검
+  python -m exam_booker sanitize 저장화면.html -o 공유용.html  저장 화면에서 개인정보·스크립트 제거
 """
 
 from __future__ import annotations
@@ -202,6 +205,30 @@ def cmd_cleanup(args) -> int:
     return 0
 
 
+def cmd_check_page(args) -> int:
+    from .check_page import check_page
+
+    prefs = args.prefs.replace(";", "\n")
+    if args.prefs_file:
+        prefs = Path(args.prefs_file).read_text(encoding="utf-8")
+    report = check_page(
+        args.snapshot, prefs, site=args.site, slot_row=args.slot_row or "",
+        executable_path=os.environ.get("EXAM_BOOKER_CHROMIUM") or None,
+    )
+    print(report.render())
+    return 0 if report.best else 1
+
+
+def cmd_sanitize(args) -> int:
+    from .check_page import sanitize_html
+
+    src = Path(args.snapshot)
+    out = Path(args.output) if args.output else src.with_name(src.stem + ".clean.html")
+    out.write_text(sanitize_html(src.read_text(encoding="utf-8", errors="replace")), encoding="utf-8")
+    print(f"정리본: {out}\n공유 전 파일을 열어 이름·수험번호 등 남은 개인정보가 없는지 꼭 한 번 더 확인하세요.")
+    return 0
+
+
 def cmd_sites(_args) -> int:
     for key, s in SITES.items():
         print(f"  {key:<6} {s['name']}\n         {s['login_url']}")
@@ -211,7 +238,7 @@ def cmd_sites(_args) -> int:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # 예전 사용법 호환: python -m exam_booker config.yaml
-    if argv and argv[0] not in {"run", "vault", "inspect", "sites", "cleanup", "-h", "--help"}:
+    if argv and argv[0] not in {"run", "vault", "inspect", "sites", "cleanup", "check-page", "sanitize", "-h", "--help"}:
         argv.insert(0, "run")
 
     ap = argparse.ArgumentParser(prog="exam_booker", description="자격증 시험 1인 접수 도우미 (Q-Net·KCA·KISA)")
@@ -240,6 +267,19 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--vault-too", action="store_true", help="암호화 보관함도 삭제")
     c.add_argument("--yes", action="store_true", help="확인 없이 삭제")
     c.set_defaults(func=cmd_cleanup)
+
+    k = sub.add_parser("check-page", help="저장한 화면으로 보조 모드 오프라인 점검(사이트 접속 없음)")
+    k.add_argument("snapshot", help="브라우저에서 Ctrl+S로 저장한 HTML")
+    k.add_argument("--prefs", default="", help="희망 조건. 줄 구분은 ';' (예: \"상암고|2026-11-21;개포고\")")
+    k.add_argument("--prefs-file", help="희망 조건 파일(한 줄에 '시험장 | 날짜 | 시간')")
+    k.add_argument("--site", default="qnet", choices=["qnet", "kca", "kisa"])
+    k.add_argument("--slot-row", help="일정 행 선택자 직접 지정")
+    k.set_defaults(func=cmd_check_page)
+
+    z = sub.add_parser("sanitize", help="저장 화면에서 개인정보·스크립트 제거(공유용)")
+    z.add_argument("snapshot")
+    z.add_argument("-o", "--output")
+    z.set_defaults(func=cmd_sanitize)
 
     s = sub.add_parser("sites", help="사이트 프리셋 목록")
     s.set_defaults(func=cmd_sites)
