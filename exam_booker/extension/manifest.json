@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "시험 접수 보조",
+  "version": "0.1.0",
+  "description": "자격시험 원서접수 화면에서 희망 시험장 빈자리를 찾아 표시합니다. 클릭·입력·로그인은 하지 않습니다.",
+  "permissions": [
+    "storage",
+    "notifications"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "시험 접수 보조 설정"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.q-net.or.kr/*",
+        "https://*.cq.or.kr/*",
+        "https://*.kisa.or.kr/*"
+      ],
+      "js": [
+        "matching.js",
+        "sites.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

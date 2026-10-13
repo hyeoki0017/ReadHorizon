@@ -1,0 +1,67 @@
+# 자격증 시험 1인 접수 도우미 설정 예시
+# 1) 이 파일을 config.yaml로 복사  2) 사이트·희망 조건·선택자 수정  3) python -m exam_booker run config.yaml --check
+# ※ 이 파일에는 아이디·비밀번호·주민번호를 적지 않습니다(적으면 오류로 거부).
+#    로그인 정보는 'python -m exam_booker vault add qnet'으로 암호화 보관함에 따로 저장합니다.
+
+# ※ 이 설정은 '자동 모드'(자동 로그인·자동 클릭)용입니다. 실제 사이트에서는 기관의 허용 근거가 있어야 실행됩니다.
+#    허용 전에는 크롬 확장 '접수 보조 모드'(extension/ 폴더)를 쓰세요.
+# 기관 서면 답변 등 허용 근거 (예: "한국산업인력공단 2026-10-20 답변, 접수번호 1AA-...")
+site_permission: ""
+
+# 사이트 프리셋: qnet | kca | kisa  (로그인 화면 기본 선택자·대기열 감지를 채워 줌, 아래 값이 우선)
+site: qnet
+
+# 로그인 페이지 / 원서접수 페이지
+# ※ 자리표시용 주소입니다. 실제 화면의 주소창 URL을 복사해 넣으세요.
+login_url: https://www.q-net.or.kr/
+apply_url: https://www.q-net.or.kr/
+
+# 자동 로그인 (빼거나 enabled: false면 직접 로그인)
+login:
+  credential: qnet          # 보관함 항목 이름 (vault add 할 때 쓴 이름)
+  vault: credentials.enc    # 암호화 보관함 파일
+  lead_minutes: 5           # 접수 몇 분 전에 로그인할지(너무 이르면 세션 만료)
+  timeout_seconds: 30       # 로그인 성공 표시를 기다릴 시간. 실패해도 재시도하지 않음(계정 잠금 방지)
+  # 프리셋 선택자가 안 맞으면 inspect로 확인해 덮어쓰기:
+  # id_field: "#userId"
+  # pw_field: "#userPw"
+  # submit_button: "#btnLogin"
+  # logged_in_marker: "a:has-text('로그아웃')"
+
+# 접수 시작 시각 (시간대를 안 적으면 한국 시간)
+open_at: "2026-11-02 10:00:00"
+lead_seconds: 2            # 몇 초 전부터 시도할지
+poll_interval: 1.0         # 새로고침 간격(초). 1초 미만은 허용하지 않습니다(차단 방지).
+give_up_after_minutes: 30  # 이 시간 안에 못 잡으면 중단
+
+# 희망 조건 — 위에서부터 우선순위. 화면에 보이는 글자 일부를 적으면 됩니다.
+# 날짜는 2026-11-21 / 2026.11.21 / 11월 21일 모두 같은 것으로 인식합니다.
+# 비워 둔 항목은 '아무거나 괜찮음'입니다.
+preferences:
+  - { venue: "상암고", date: "2026-11-21", time: "09:00" }
+  - { venue: "상암고", date: "2026-11-21" }
+  - { venue: "개포고" }
+  - { venue: "서울" }
+
+# 이 글자가 들어 있는 행은 자리가 없는 것으로 봅니다(잔여 0, 0석도 자동 인식).
+full_keywords: ["마감", "매진", "불가"]
+
+# 최종 접수(결제) 버튼을 자동으로 누를지. 기본은 false — 자리 선택까지만 자동, 확정은 직접.
+auto_confirm: false
+
+# 로그인 상태가 저장되는 폴더(내 PC에만 저장, 커밋 금지)
+profile_dir: browser_profile
+
+# ── 화면 구조(CSS 선택자) ─────────────────────────────────────
+# 사이트마다 다르므로 브라우저 개발자도구(F12)로 확인해 맞춰 주세요.
+# 아래 값은 mock/mock_site.html(모의 사이트) 기준 예시입니다.
+selectors:
+  apply_button: "#apply"                 # 접수 버튼 (비활성 → 활성 될 때까지 새로고침)
+  before_slots:                          # 일정 목록을 띄우기 전 차례로 누를 것(지역 조회 등). 없으면 비움
+    - "#search"
+  slot_row: "#slots tbody tr.slot"       # 시험일·시간·시험장이 한 줄씩 나오는 행
+  slot_choose: "button.choose"           # 그 행 안의 '선택' 버튼
+  confirm_button: "#final"               # 최종 접수 버튼 (자동 확정 안 해도 빨간 테두리로 표시)
+  blockers:                              # 보이면 멈추고 사람에게 넘길 화면(보안문자·대기열)
+    - "#captcha"
+    - "#NetFunnel_Loading_Popup"

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>시험 접수 보조 설정</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; }
+  label { display: block; margin: 10px 0 4px; font-weight: 600; }
+  input[type=text], input[type=datetime-local], textarea { width: 100%; box-sizing: border-box; padding: 6px; font: inherit; }
+  textarea { min-height: 120px; font-family: ui-monospace, monospace; }
+  .hint { font-size: 13px; opacity: .75; }
+  .consent { border: 1px solid #9ca3af; border-radius: 8px; padding: 10px 14px; }
+  .consent label { font-weight: normal; display: flex; gap: 8px; align-items: flex-start; }
+  #status { margin-left: 10px; font-weight: 600; }
+  .err { color: #dc2626; } .ok { color: #16a34a; }
+  button { padding: 8px 18px; font: inherit; cursor: pointer; }
+  details { margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>시험 접수 보조 설정</h1>
+<p class="hint">Q-Net·KCA(CQ-Net)·KISA 접수 화면에서 희망 시험장의 빈자리를 찾아 <b>초록색으로 표시</b>하고 알림을 띄웁니다.
+이 확장 프로그램은 <b>로그인·클릭·입력·새로고침·결제를 하지 않습니다.</b></p>
+
+<h2>1. 동의 (모두 체크해야 동작합니다)</h2>
+<div class="consent" id="consent">
+  <label><input type="checkbox" data-c> 본인 계정으로 본인의 접수에만 사용하며, 대리 접수·자리 양도에 쓰지 않습니다.</label>
+  <label><input type="checkbox" data-c> 이 도구는 화면을 읽어 표시만 하고, 로그인·버튼 클릭·입력·결제는 제가 직접 한다는 것을 이해합니다.</label>
+  <label><input type="checkbox" data-c> 보안문자·접속 대기열은 제가 직접 처리합니다(도구는 우회하지 않음).</label>
+  <label><input type="checkbox" data-c> 접수 성공을 보장하지 않으며, 사이트 화면이 바뀌면 표시가 안 될 수 있음을 이해합니다.</label>
+  <label><input type="checkbox" data-c> 저장 정보는 아래 희망 조건과 접수 시각뿐이며 이 브라우저에만 저장되고 외부로 보내지 않음을 확인했습니다.
+    (서버 시각 확인을 위해 접수 사이트에 요청을 1회 보냅니다.)</label>
+</div>
+
+<h2>2. 접수 정보</h2>
+<label><input type="checkbox" id="enabled" checked> 접수 보조 켜기</label>
+<label for="openAt">접수 시작 시각 (한국 시간)</label>
+<input type="datetime-local" id="openAt" step="1">
+<label for="prefs">희망 조건 — 위에서부터 우선순위, 한 줄에 <code>시험장 | 날짜 | 시간</code></label>
+<textarea id="prefs" placeholder="상암고 | 2026-11-21 | 09:00&#10;상암고 | 11월 21일&#10;개포고&#10;서울"></textarea>
+<div class="hint">화면에 보이는 글자 일부만 적으면 됩니다. 비운 칸은 '아무거나'. 날짜는 2026-11-21 / 2026.11.21 / 11월 21일 모두 같게 인식합니다.
+  이름·생년월일·연락처는 적지 마세요.</div>
+
+<details>
+  <summary>고급: 사이트 화면 구조 (표시가 안 될 때)</summary>
+  <p class="hint">사이트 화면이 바뀌어 일정 줄을 못 찾으면 F12(개발자도구)로 확인해 바꿉니다. 비우면 기본값.</p>
+  <label for="slotRow">일정 행 선택자 (기본: <code>table tbody tr</code>)</label>
+  <input type="text" id="slotRow" placeholder="table tbody tr">
+  <label for="applyTexts">원서접수 버튼 글자 (쉼표 구분)</label>
+  <input type="text" id="applyTexts" placeholder="원서접수, 접수하기, 접수 신청, 신청하기">
+  <label for="fullKeywords">'자리 없음'으로 볼 글자 (쉼표 구분)</label>
+  <input type="text" id="fullKeywords" placeholder="마감, 매진, 불가">
+</details>
+
+<p><button id="save">저장</button><span id="status"></span></p>
+
+<h2>3. 저장된 정보 삭제</h2>
+<p><button id="wipe">모든 설정·동의 기록 삭제</button></p>
+
+<script src="matching.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

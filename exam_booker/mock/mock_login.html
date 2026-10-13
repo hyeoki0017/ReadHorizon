@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>모의 로그인</title></head>
+<body>
+<!-- 테스트용 가짜 로그인 화면 (실제 사이트와 무관). 아이디 tester / 비밀번호 test-pw-1234 -->
+<input id="search" type="text" placeholder="사이트 검색">
+<form id="loginForm" onsubmit="return login()">
+  <input type="text" name="userId" placeholder="아이디">
+  <input type="password" name="userPw" placeholder="비밀번호">
+  <button type="submit">로그인</button>
+</form>
+<div id="welcome" hidden>홍*동님 환영합니다 <a href="#">로그아웃</a></div>
+<p id="error"></p>
+<script>
+  function login() {
+    const f = document.getElementById("loginForm");
+    if (document.getElementById("search").value) { document.getElementById("error").textContent = "검색창 오입력"; return false; }
+    if (f.userId.value === "tester" && f.userPw.value === "test-pw-1234") {
+      f.hidden = true; document.getElementById("welcome").hidden = false;
+    } else {
+      document.getElementById("error").textContent = "아이디 또는 비밀번호가 틀렸습니다";
+    }
+    return false;
+  }
+</script>
+</body>
+</html>

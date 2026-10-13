@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>모의 시험 접수 사이트</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  table { border-collapse: collapse; margin-top: 12px; }
+  td, th { border: 1px solid #999; padding: 4px 10px; }
+  #captcha { display: none; padding: 12px; background: #fee; margin: 8px 0; }
+  #result { margin-top: 12px; font-weight: bold; }
+</style>
+</head>
+<body>
+<!--
+  연습·테스트용 가짜 접수 화면 (실제 사이트와 무관).
+  주소 뒤 쿼리:  ?open=<접수 시작 epoch ms>&captcha=1(보안문자 화면 표시)
+-->
+<h1>정보처리기사 실기 원서접수 (모의)</h1>
+<p id="status"></p>
+<button id="apply" disabled>원서접수</button>
+<div id="captcha">보안문자를 입력하세요: <input id="captcha-input"> <button id="captcha-ok">확인</button></div>
+<div id="step2" hidden>
+  <label>지역 <select id="region"><option>전체</option><option>서울</option></select></label>
+  <button id="search">조회</button>
+  <table id="slots"><thead><tr><th>시험일</th><th>시간</th><th>시험장</th><th>잔여석</th><th></th></tr></thead><tbody></tbody></table>
+  <button id="final" hidden>접수하기(결제)</button>
+</div>
+<div id="result"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const openAt = Number(q.get("open") || 0);
+  const apply = document.getElementById("apply");
+  const status = document.getElementById("status");
+  if (q.get("captcha") === "1") document.getElementById("captcha").style.display = "block";
+  document.getElementById("captcha-ok").onclick = () => { document.getElementById("captcha").style.display = "none"; };
+
+  if (Date.now() >= openAt) { apply.disabled = false; status.textContent = "접수 중"; }
+  else { status.textContent = "접수 시작 전입니다"; }
+
+  const SLOTS = [
+    ["2026. 11. 21", "09:00", "서울 마포 상암고", "0"],
+    ["2026. 11. 21", "13:00", "서울 마포 상암고", "3"],
+    ["2026. 11. 22", "09:00", "서울 강남 개포고", "12"],
+    ["2026. 11. 22", "09:00", "인천 부평 부평고", "마감"],
+  ];
+  apply.onclick = () => { document.getElementById("step2").hidden = false; };
+  document.getElementById("search").onclick = () => {
+    const tb = document.querySelector("#slots tbody");
+    tb.innerHTML = "";
+    SLOTS.forEach((s, i) => {
+      const tr = document.createElement("tr");
+      tr.className = "slot";
+      tr.innerHTML = `<td>${s[0]}</td><td>${s[1]}</td><td>${s[2]}</td><td>${s[3] === "마감" ? "마감" : "잔여 " + s[3]}</td><td><button class="choose">선택</button></td>`;
+      tr.querySelector(".choose").onclick = () => {
+        if (!confirm(`${s[2]} ${s[0]} ${s[1]} 으로 선택하시겠습니까?`)) return;
+        document.getElementById("result").textContent = `선택됨: ${s[0]} ${s[1]} ${s[2]}`;
+        document.getElementById("final").hidden = false;
+      };
+      tb.appendChild(tr);
+    });
+  };
+  document.getElementById("final").onclick = () => {
+    document.getElementById("result").textContent += " / 접수 완료";
+  };
+</script>
+</body>
+</html>
