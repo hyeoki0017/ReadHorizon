@@ -24,12 +24,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.6"]
+# LabCoach 실시간 오버레이(화면 캡처·창 찾기·Qt 오버레이·로컬 음성·전역 단축키)
+labcoach = ["mss>=9.0", "pywinctl>=0.4", "PySide6>=6.7", "pyttsx3>=2.90", "pynput>=1.7.7"]
 
 [project.scripts]
 readhorizon = "readhorizon.cli:main"
+labcoach = "labcoach.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["readhorizon*"]
+include = ["readhorizon*", "labcoach*"]
 
 [tool.setuptools.package-data]
 readhorizon = ["static/*", "analysis/*.json"]

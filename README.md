@@ -3,6 +3,10 @@
 소설·시·희곡·수필·고전·논문·기사 같은 텍스트를 **원문에 근거해** 분석하고, 문맥·문단 흐름·의미·번역을 이해하도록 돕는 프로그램입니다.
 수능 국어처럼 정답이 있는 독해에도 쓸 수 있도록, 모든 분석에 원문 인용을 붙이고 인용이 실제 원문과 맞는지 자동으로 확인합니다.
 
+> **LabCoach (보안 실습 실시간 학습 오버레이)**: VirtualBox·VMware 실습 화면 위에 자막·화살표·텍스트 박스·음성으로
+> 공격·방어 흐름, 스택, 레지스트리 변화를 설명합니다. 사용법과 실습 환경 안전 수칙은 [docs/labcoach.md](docs/labcoach.md)를 보세요.
+> (`pip install -r requirements-labcoach.txt` → `python -m labcoach run`)
+
 > 설계 배경과 결정 사항은 [docs/design.md](docs/design.md), 제품 요구사항(사용자 모드·앱·운영 방식)은 [docs/PRD.md](docs/PRD.md)(Word 판: [docs/PRD.docx](docs/PRD.docx))에 정리되어 있습니다.
 
 ## 핵심 원칙
@@ -175,11 +179,13 @@ python -m readhorizon eval samples/eval_items.sample.json
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q
-ruff check readhorizon tests
+ruff check readhorizon labcoach tests
 ```
 
 테스트는 파서, 정규화(NFC·긴 문단 분할), 마스킹, 검색, 서지 파싱, 인용 검증, 번역 부분 나누기·자동 검사, 품질 평가 채점 정리, 독자 설정·용어집·모범 예시(평가 문항과 겹치지 않는지 포함), 3층 번역·심화 검토, API, 자료실 분리, 보관 기간 삭제, 요청 크기·호출 제한, XML 엔티티 공격 차단을 다룹니다.
 또 실제 Anthropic SDK로 로컬 가짜 서버와 통신해 요청 형식(Citations, 캐시, fallbacks, 구조화 출력)과 스트리밍 응답 파싱을 확인합니다.
+LabCoach는 좌표 보정, 실습용 마스킹(공인 IP·MAC·사용자 폴더·키), 수집 항목 기록·30일 고지, Procmon·Regshot 발췌, 화면 변화 감지, 요청 구성과 SDK 왕복을 테스트하고,
+PySide6가 설치된 환경에서는 오버레이·패널을 화면 없이(offscreen) 띄워 분석 → 표시 → 노트 저장 흐름까지 확인합니다.
 
 ## 구조
 
@@ -202,6 +208,7 @@ readhorizon/
   catalog/             국립중앙도서관 서지 API, KDC 장르 추천
   privacy/             민감정보 마스킹, 수집 항목 고지
   static/              웹 화면 (HTML/CSS/JS, 외부 CDN 없음, CSP 적용)
+labcoach/              보안 실습 실시간 학습 오버레이 (docs/labcoach.md)
 samples/               저작권 만료 작품, 참고자료·문항 형식 예시
 tests/
 docs/design.md         설계 결정 기록

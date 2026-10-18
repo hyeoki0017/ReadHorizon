@@ -1,0 +1,7 @@
+# LabCoach 실시간 오버레이용 추가 패키지 (호스트 PC에 설치)
+-r requirements.txt
+mss>=9.0
+pywinctl>=0.4
+PySide6>=6.7
+pyttsx3>=2.90
+pynput>=1.7.7

@@ -26,7 +26,7 @@ jobs:
       - name: 의존성 설치
         run: pip install -r requirements-dev.txt
       - name: 린트
-        run: ruff check readhorizon tests
+        run: ruff check readhorizon labcoach tests
       - name: 테스트
         run: python -m pytest -q
       - name: 프런트엔드 문법 검사
